@@ -17,7 +17,7 @@ import ConnectWallet from "@/components/ConnectWallet";
 import AIChat from "@/components/AIChat";
 import { useActiveAccount } from "thirdweb/react";
 import { readContract, sendTransaction, prepareContractCall } from "thirdweb";
-import { simpleUSDContract, simpleSwapContract, mockETHContract, formatTokenAmount, parseTokenAmount, CONTRACT_ADDRESSES } from "@/lib/contracts";
+import { simpleUSDContract, simpleSwapContract, mockETHContract, simpleStakeContract, formatTokenAmount, parseTokenAmount, CONTRACT_ADDRESSES } from "@/lib/contracts";
 
 interface UserAchievements {
   firstClaim: boolean;
@@ -78,15 +78,22 @@ export default function SimplePage() {
   const [swapFromAmount, setSwapFromAmount] = useState("");
   const [swapToAmount, setSwapToAmount] = useState("");
   const [swapDirection, setSwapDirection] = useState<"SUSD_TO_ETH" | "ETH_TO_SUSD">("SUSD_TO_ETH");
-  const [swapRate] = useState(0.00025); // 1 SUSD = 0.00025 ETH (ETH at $4000)
   const [isSwapLoading, setIsSwapLoading] = useState(false);
   const [mockEthBalance, setMockEthBalance] = useState("0");
   const [swapHistory, setSwapHistory] = useState<Array<[string, string, string, bigint, bigint, bigint, bigint]>>([]);
 
   // Stake state
   const [stakeAmount, setStakeAmount] = useState("");
-  const [stakedBalance] = useState(5000);
-  const [earnedRewards] = useState(125.5);
+  const [stakedBalance, setStakedBalance] = useState(0);
+  const [earnedRewards, setEarnedRewards] = useState(0);
+  const [isStakeLoading, setIsStakeLoading] = useState(false);
+  const [isUnstakeLoading, setIsUnstakeLoading] = useState(false);
+  const [poolStats, setPoolStats] = useState({
+    totalStaked: 0,
+    totalStakers: 0,
+    apy: 12,
+    availableRewards: 0
+  });
 
   // Lend state
   const [lendAmount, setLendAmount] = useState("");
@@ -496,11 +503,211 @@ export default function SimplePage() {
     }
   };
 
-  const handleStake = () => {
-    if (!stakeAmount) return;
-    const dummyHash = `0x${Math.random().toString(16).substring(2, 66)}`;
-    showTransactionSuccess(dummyHash);
-    setStakeAmount("");
+  // Load staking data
+  const loadStakingData = useCallback(async () => {
+    if (!account) return;
+    
+    try {
+      // Get user's staking info
+      const stakeInfo = await readContract({
+        contract: simpleStakeContract,
+        method: "function getStakeInfo(address) view returns (uint256,uint256,uint256,uint256)",
+        params: [account.address],
+      });
+      const [staked, earned] = stakeInfo as [bigint, bigint, bigint, bigint];
+      
+      setStakedBalance(Number(formatTokenAmount(staked)));
+      setEarnedRewards(Number(formatTokenAmount(earned)));
+
+      // Get pool statistics
+      const poolData = await readContract({
+        contract: simpleStakeContract,
+        method: "function getPoolStats() view returns (uint256,uint256,uint256,uint256)",
+        params: [],
+      });
+      const [totalStakedAmount, totalStakers, poolApy, availableRewards] = poolData as [bigint, bigint, bigint, bigint];
+      
+      setPoolStats({
+        totalStaked: Number(formatTokenAmount(totalStakedAmount)),
+        totalStakers: Number(totalStakers),
+        apy: Number(poolApy),
+        availableRewards: Number(formatTokenAmount(availableRewards))
+      });
+    } catch (error) {
+      console.error("Error loading staking data:", error);
+    }
+  }, [account]);
+
+  const handleStake = async () => {
+    if (!stakeAmount || !account) return;
+    
+    try {
+      setIsStakeLoading(true);
+      const stakeAmountWei = parseTokenAmount(stakeAmount);
+      
+      // Check current allowance first
+      const currentAllowance = await readContract({
+        contract: simpleUSDContract,
+        method: "function allowance(address,address) view returns (uint256)",
+        params: [account.address, CONTRACT_ADDRESSES.SIMPLE_STAKE],
+      });
+      
+      // Only approve if needed
+      if (currentAllowance < stakeAmountWei) {
+        console.log("Approving SUSD spending...");
+        const approveTransaction = prepareContractCall({
+          contract: simpleUSDContract,
+          method: "function approve(address,uint256) returns (bool)",
+          params: [CONTRACT_ADDRESSES.SIMPLE_STAKE, stakeAmountWei],
+        });
+        
+        await sendTransaction({
+          transaction: approveTransaction,
+          account: account,
+        });
+        
+        // Wait a moment for approval to be confirmed
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      }
+
+      // Then stake
+      console.log("Staking SUSD tokens...");
+      const stakeTransaction = prepareContractCall({
+        contract: simpleStakeContract,
+        method: "function stake(uint256)",
+        params: [stakeAmountWei],
+      });
+      
+      const result = await sendTransaction({
+        transaction: stakeTransaction,
+        account: account,
+      });
+      
+      showTransactionSuccess(result.transactionHash);
+      setStakeAmount("");
+      
+      // Reload data after a delay
+      setTimeout(async () => {
+        await Promise.all([loadBalances(), loadStakingData()]);
+      }, 3000);
+      
+    } catch (error: unknown) {
+      console.error("Staking failed:", error);
+      
+      // More user-friendly error messages
+      let errorMessage = "Staking failed. Please try again.";
+      
+      if (error instanceof Error) {
+        if (error.message.includes("User rejected")) {
+          errorMessage = "Transaction was cancelled by user.";
+        } else if (error.message.includes("insufficient funds")) {
+          errorMessage = "Insufficient ETH for gas fees.";
+        } else if (error.message.includes("gas")) {
+          errorMessage = "Gas estimation failed. Try reducing the amount or try again later.";
+        } else if (error.message.includes("500")) {
+          errorMessage = "Network error. Please try again in a moment.";
+        }
+      }
+      
+      alert(errorMessage);
+    } finally {
+      setIsStakeLoading(false);
+    }
+  };
+
+  const handleUnstake = async (amount?: string) => {
+    if (!account) return;
+    
+    try {
+      setIsUnstakeLoading(true);
+      const unstakeAmount = amount ? parseTokenAmount(amount) : BigInt(0); // 0 means unstake all
+      
+      console.log("Unstaking SUSD tokens...");
+      const unstakeTransaction = prepareContractCall({
+        contract: simpleStakeContract,
+        method: "function unstake(uint256)",
+        params: [unstakeAmount],
+      });
+      
+      const result = await sendTransaction({
+        transaction: unstakeTransaction,
+        account: account,
+      });
+      
+      showTransactionSuccess(result.transactionHash);
+      
+      // Reload data after delay
+      setTimeout(async () => {
+        await Promise.all([loadBalances(), loadStakingData()]);
+      }, 3000);
+      
+    } catch (error: unknown) {
+      console.error("Unstaking failed:", error);
+      
+      let errorMessage = "Unstaking failed. Please try again.";
+      
+      if (error instanceof Error) {
+        if (error.message.includes("User rejected")) {
+          errorMessage = "Transaction was cancelled by user.";
+        } else if (error.message.includes("insufficient funds")) {
+          errorMessage = "Insufficient ETH for gas fees.";
+        } else if (error.message.includes("gas")) {
+          errorMessage = "Gas estimation failed. Please try again later.";
+        } else if (error.message.includes("500")) {
+          errorMessage = "Network error. Please try again in a moment.";
+        }
+      }
+      
+      alert(errorMessage);
+    } finally {
+      setIsUnstakeLoading(false);
+    }
+  };
+
+  const handleClaimRewards = async () => {
+    if (!account) return;
+    
+    try {
+      console.log("Claiming staking rewards...");
+      const claimTransaction = prepareContractCall({
+        contract: simpleStakeContract,
+        method: "function claimRewards()",
+        params: [],
+      });
+      
+      const result = await sendTransaction({
+        transaction: claimTransaction,
+        account: account,
+      });
+      
+      showTransactionSuccess(result.transactionHash);
+      
+      // Reload data after delay
+      setTimeout(async () => {
+        await Promise.all([loadBalances(), loadStakingData()]);
+      }, 3000);
+      
+    } catch (error: unknown) {
+      console.error("Claiming rewards failed:", error);
+      
+      let errorMessage = "Claiming rewards failed. Please try again.";
+      
+      if (error instanceof Error) {
+        if (error.message.includes("User rejected")) {
+          errorMessage = "Transaction was cancelled by user.";
+        } else if (error.message.includes("insufficient funds")) {
+          errorMessage = "Insufficient ETH for gas fees.";
+        } else if (error.message.includes("gas")) {
+          errorMessage = "Gas estimation failed. Please try again later.";
+        } else if (error.message.includes("500")) {
+          errorMessage = "Network error. Please try again in a moment.";
+        } else if (error.message.includes("No rewards")) {
+          errorMessage = "No rewards available to claim.";
+        }
+      }
+      
+      alert(errorMessage);
+    }
   };
 
   const handleLend = () => {
@@ -535,8 +742,9 @@ export default function SimplePage() {
     if (account) {
       loadBalances();
       loadSwapHistory();
+      loadStakingData();
     }
-  }, [account, loadBalances, loadSwapHistory]);
+  }, [account, loadBalances, loadSwapHistory, loadStakingData]);
 
   // Calculate swap output when input changes
   useEffect(() => {
@@ -1143,17 +1351,51 @@ export default function SimplePage() {
                     Stake Tokens
                   </h3>
                   <div className="space-y-4">
+                    {/* Balance Display */}
+                    <div className="bg-gray-50 rounded-lg p-3 border border-gray-200">
+                      <div className="flex justify-between items-center">
+                        <span className="text-sm font-medium text-gray-700">Your SUSD Balance:</span>
+                        <span className="text-lg font-bold text-gray-900">{parseFloat(susdBalance).toLocaleString()} SUSD</span>
+                      </div>
+                      {parseFloat(susdBalance) === 0 && (
+                        <div className="text-xs text-amber-600 mt-1">
+                          💡 Claim free SUSD from the Claim tab first
+                        </div>
+                      )}
+                    </div>
+
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
                         Amount to Stake
                       </label>
-                      <input
-                        type="number"
-                        placeholder="Enter SUSD amount"
-                        value={stakeAmount}
-                        onChange={(e) => setStakeAmount(e.target.value)}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
-                      />
+                      <div className="relative">
+                        <input
+                          type="number"
+                          placeholder="Enter SUSD amount"
+                          value={stakeAmount}
+                          onChange={(e) => setStakeAmount(e.target.value)}
+                          className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 ${
+                            stakeAmount && parseFloat(stakeAmount) > parseFloat(susdBalance)
+                              ? "border-red-300 focus:ring-red-500 focus:border-red-500"
+                              : "border-gray-300 focus:ring-green-500 focus:border-green-500"
+                          }`}
+                        />
+                        {parseFloat(susdBalance) > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setStakeAmount(susdBalance)}
+                            className="absolute right-2 top-1/2 transform -translate-y-1/2 text-xs bg-blue-100 text-blue-600 px-2 py-1 rounded hover:bg-blue-200 transition-colors"
+                          >
+                            MAX
+                          </button>
+                        )}
+                      </div>
+                      {stakeAmount && parseFloat(stakeAmount) > parseFloat(susdBalance) && (
+                        <div className="text-sm text-red-600 mt-1 flex items-center">
+                          <span className="mr-1">⚠️</span>
+                          Insufficient balance. You can stake up to {parseFloat(susdBalance).toLocaleString()} SUSD
+                        </div>
+                      )}
                     </div>
                     <div className="text-sm text-gray-600">
                       Estimated annual earnings:{" "}
@@ -1163,25 +1405,51 @@ export default function SimplePage() {
                       SUSD
                     </div>
                     <div className="relative group">
-                      <motion.button
-                        whileHover={{
-                          scale: isWalletConnected && stakeAmount ? 1.02 : 1,
-                        }}
-                        whileTap={{
-                          scale: isWalletConnected && stakeAmount ? 0.98 : 1,
-                        }}
-                        onClick={isWalletConnected ? handleStake : undefined}
-                        disabled={!isWalletConnected || !stakeAmount}
-                        className="w-full py-3 bg-green-600 text-white font-bold rounded-lg hover:bg-green-700 disabled:bg-gray-300 transition-colors cursor-pointer disabled:cursor-not-allowed">
-                        Stake SUSD
-                      </motion.button>
-                      {!isWalletConnected && (
-                        <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none">
-                          <div className="bg-gray-800 text-white text-sm px-3 py-1 rounded-lg whitespace-nowrap">
-                            Connect Wallet to transact
-                          </div>
-                        </div>
-                      )}
+                      {(() => {
+                        const isAmountValid = stakeAmount && parseFloat(stakeAmount) > 0 && parseFloat(stakeAmount) <= parseFloat(susdBalance);
+                        const canStake = isWalletConnected && isAmountValid && !isStakeLoading;
+                        
+                        return (
+                          <>
+                            <motion.button
+                              whileHover={{
+                                scale: canStake ? 1.02 : 1,
+                              }}
+                              whileTap={{
+                                scale: canStake ? 0.98 : 1,
+                              }}
+                              onClick={canStake ? handleStake : undefined}
+                              disabled={!canStake}
+                              className={`w-full py-3 font-bold rounded-lg transition-colors cursor-pointer disabled:cursor-not-allowed ${
+                                !isWalletConnected || isStakeLoading
+                                  ? "bg-gray-300 text-gray-500"
+                                  : !stakeAmount
+                                  ? "bg-gray-300 text-gray-500"
+                                  : stakeAmount && parseFloat(stakeAmount) > parseFloat(susdBalance)
+                                  ? "bg-red-500 text-white"
+                                  : "bg-green-600 text-white hover:bg-green-700"
+                              }`}>
+                              {isStakeLoading 
+                                ? "Staking..." 
+                                : !isWalletConnected
+                                ? "Connect Wallet to Stake"
+                                : !stakeAmount
+                                ? "Enter Amount to Stake"
+                                : stakeAmount && parseFloat(stakeAmount) > parseFloat(susdBalance)
+                                ? "Insufficient Balance"
+                                : "Stake SUSD"
+                              }
+                            </motion.button>
+                            {!isWalletConnected && (
+                              <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none">
+                                <div className="bg-gray-800 text-white text-sm px-3 py-1 rounded-lg whitespace-nowrap">
+                                  Connect Wallet to transact
+                                </div>
+                              </div>
+                            )}
+                          </>
+                        );
+                      })()}
                     </div>
                   </div>
                 </div>
@@ -1200,41 +1468,80 @@ export default function SimplePage() {
                     <div className="flex justify-between">
                       <span className="text-gray-600">Earned Rewards:</span>
                       <span className="font-semibold text-green-600">
-                        {earnedRewards} SUSD
+                        {earnedRewards.toFixed(4)} SUSD
                       </span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-600">APY:</span>
-                      <span className="font-semibold">12.0%</span>
+                      <span className="font-semibold">{poolStats.apy}%</span>
                     </div>
-                    <div className="relative group">
-                      <button
-                        disabled={!isWalletConnected}
-                        className="w-full py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 disabled:bg-gray-300 transition-colors cursor-pointer disabled:cursor-not-allowed">
-                        Claim Rewards
-                      </button>
-                      {!isWalletConnected && (
-                        <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none">
-                          <div className="bg-gray-800 text-white text-sm px-3 py-1 rounded-lg whitespace-nowrap">
-                            Connect Wallet to transact
+                    {earnedRewards > 0 && (
+                      <div className="relative group">
+                        <button
+                          onClick={isWalletConnected ? handleClaimRewards : undefined}
+                          disabled={!isWalletConnected || earnedRewards === 0}
+                          className="w-full py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 disabled:bg-gray-300 transition-colors cursor-pointer disabled:cursor-not-allowed">
+                          Claim {earnedRewards.toFixed(4)} SUSD Rewards
+                        </button>
+                        {!isWalletConnected && (
+                          <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none">
+                            <div className="bg-gray-800 text-white text-sm px-3 py-1 rounded-lg whitespace-nowrap">
+                              Connect Wallet to transact
+                            </div>
                           </div>
-                        </div>
-                      )}
-                    </div>
-                    <div className="relative group">
-                      <button
-                        disabled={!isWalletConnected}
-                        className="w-full py-2 bg-red-600 text-white font-medium rounded-lg hover:bg-red-700 disabled:bg-gray-300 transition-colors cursor-pointer disabled:cursor-not-allowed">
-                        Unstake All
-                      </button>
-                      {!isWalletConnected && (
-                        <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none">
-                          <div className="bg-gray-800 text-white text-sm px-3 py-1 rounded-lg whitespace-nowrap">
-                            Connect Wallet to transact
+                        )}
+                      </div>
+                    )}
+                    {stakedBalance > 0 && (
+                      <div className="relative group">
+                        <button
+                          onClick={isWalletConnected && !isUnstakeLoading ? () => handleUnstake() : undefined}
+                          disabled={!isWalletConnected || stakedBalance === 0 || isUnstakeLoading}
+                          className="w-full py-2 bg-red-600 text-white font-medium rounded-lg hover:bg-red-700 disabled:bg-gray-300 transition-colors cursor-pointer disabled:cursor-not-allowed">
+                          {isUnstakeLoading ? "Unstaking..." : `Unstake All ${stakedBalance.toFixed(2)} SUSD`}
+                        </button>
+                        {!isWalletConnected && (
+                          <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none">
+                            <div className="bg-gray-800 text-white text-sm px-3 py-1 rounded-lg whitespace-nowrap">
+                              Connect Wallet to transact
+                            </div>
                           </div>
-                        </div>
-                      )}
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Pool Statistics */}
+              <div className="bg-white border border-gray-200 rounded-2xl p-6 mt-8">
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">
+                  Pool Statistics
+                </h3>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div className="text-center">
+                    <div className="text-2xl font-bold text-gray-900">
+                      {poolStats.totalStaked.toLocaleString()}
                     </div>
+                    <div className="text-sm text-gray-600">Total Staked SUSD</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-2xl font-bold text-gray-900">
+                      {poolStats.totalStakers}
+                    </div>
+                    <div className="text-sm text-gray-600">Active Stakers</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-2xl font-bold text-green-600">
+                      {poolStats.apy}%
+                    </div>
+                    <div className="text-sm text-gray-600">Current APY</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-2xl font-bold text-blue-600">
+                      {poolStats.availableRewards.toLocaleString()}
+                    </div>
+                    <div className="text-sm text-gray-600">Available Rewards</div>
                   </div>
                 </div>
               </div>
