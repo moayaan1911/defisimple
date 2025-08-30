@@ -65,6 +65,23 @@ deploy-all:
 	@echo "✅ SimpleLend deployed"
 	@echo "🎉 All contracts deployed successfully!"
 
+# Interaction commands (SHOULD HAVE BEEN THERE FROM DAY 1!)
+add-liquidity:
+	@echo "💧 Adding liquidity to SimpleSwap..."
+	@forge script script/Interactions.s.sol:Interactions --sig "addLiquidity()" $(NETWORK_ARGS)
+
+claim-susd:
+	@echo "🎁 Claiming SUSD for owner..."
+	@forge script script/Interactions.s.sol:Interactions --sig "claimSUSDForOwner()" $(NETWORK_ARGS)
+
+test-swap:
+	@echo "🔄 Testing swap functionality..."
+	@forge script script/Interactions.s.sol:Interactions --sig "testSwap()" $(NETWORK_ARGS)
+
+setup-all:
+	@echo "🚀 Running full setup (claim + liquidity + test)..."
+	@forge script script/Interactions.s.sol:Interactions --sig "runFullSetup()" $(NETWORK_ARGS)
+
 # Legacy deploy command (defaults to SimpleUSD)
 deploy: deploy-susd
 

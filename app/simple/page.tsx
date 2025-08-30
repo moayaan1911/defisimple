@@ -1,5 +1,5 @@
 "use client";
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { motion } from "motion/react";
 import {
   FiGift,
@@ -17,7 +17,7 @@ import ConnectWallet from "@/components/ConnectWallet";
 import AIChat from "@/components/AIChat";
 import { useActiveAccount } from "thirdweb/react";
 import { readContract, sendTransaction, prepareContractCall } from "thirdweb";
-import { simpleUSDContract, formatTokenAmount, CONTRACT_ADDRESSES } from "@/lib/contracts";
+import { simpleUSDContract, simpleSwapContract, mockETHContract, formatTokenAmount, parseTokenAmount, CONTRACT_ADDRESSES } from "@/lib/contracts";
 
 interface UserAchievements {
   firstClaim: boolean;
@@ -76,7 +76,12 @@ export default function SimplePage() {
 
   // Swap state
   const [swapFromAmount, setSwapFromAmount] = useState("");
+  const [swapToAmount, setSwapToAmount] = useState("");
+  const [swapDirection, setSwapDirection] = useState<"SUSD_TO_ETH" | "ETH_TO_SUSD">("SUSD_TO_ETH");
   const [swapRate] = useState(0.00025); // 1 SUSD = 0.00025 ETH (ETH at $4000)
+  const [isSwapLoading, setIsSwapLoading] = useState(false);
+  const [mockEthBalance, setMockEthBalance] = useState("0");
+  const [swapHistory, setSwapHistory] = useState<Array<[string, string, string, bigint, bigint, bigint, bigint]>>([]);
 
   // Stake state
   const [stakeAmount, setStakeAmount] = useState("");
@@ -235,11 +240,91 @@ export default function SimplePage() {
     updateTabUsage();
   }, [activeTab]);
 
+
   const showTransactionSuccess = (txHash: string) => {
     setTransactionHash(txHash);
     setShowTransactionModal(true);
   };
 
+  // Load balances and swap history
+  const loadBalances = useCallback(async () => {
+    if (!account) return;
+    
+    try {
+      // Load SUSD balance
+      const susdBal = await readContract({
+        contract: simpleUSDContract,
+        method: "function balanceOf(address) view returns (uint256)",
+        params: [account.address],
+      });
+      setSusdBalance(formatTokenAmount(susdBal as bigint));
+
+      // Load MockETH balance
+      const mockEthBal = await readContract({
+        contract: mockETHContract,
+        method: "function balanceOf(address) view returns (uint256)",
+        params: [account.address],
+      });
+      setMockEthBalance(formatTokenAmount(mockEthBal as bigint));
+    } catch (error) {
+      console.error("Error loading balances:", error);
+    }
+  }, [account]);
+
+  const loadSwapHistory = useCallback(async () => {
+    try {
+      const history = await readContract({
+        contract: simpleSwapContract,
+        method: "function getRecentSwaps(uint256) view returns ((address,address,address,uint256,uint256,uint256,uint256)[])",
+        params: [BigInt(3)], // Get latest 3 swaps
+      });
+      setSwapHistory(history as Array<[string, string, string, bigint, bigint, bigint, bigint]>);
+    } catch (error) {
+      console.error("Error loading swap history:", error);
+    }
+  }, []);
+
+  // Calculate swap output
+  const calculateSwapOutput = useCallback(async (inputAmount: string) => {
+    if (!inputAmount || parseFloat(inputAmount) === 0) {
+      setSwapToAmount("");
+      return;
+    }
+
+    try {
+      const amountIn = parseTokenAmount(inputAmount);
+      
+      if (swapDirection === "SUSD_TO_ETH") {
+        // Get quote for SUSD -> MockETH
+        const quote = await readContract({
+          contract: simpleSwapContract,
+          method: "function getSwapQuoteSUSDToMockETH(uint256) view returns (uint256,uint256)",
+          params: [amountIn],
+        });
+        const [mockETHOut] = quote as [bigint, bigint];
+        setSwapToAmount(formatTokenAmount(mockETHOut));
+      } else {
+        // Get quote for MockETH -> SUSD  
+        const quote = await readContract({
+          contract: simpleSwapContract,
+          method: "function getSwapQuoteMockETHToSUSD(uint256) view returns (uint256,uint256)",
+          params: [amountIn],
+        });
+        const [susdOut] = quote as [bigint, bigint];
+        setSwapToAmount(formatTokenAmount(susdOut));
+      }
+    } catch (error) {
+      console.error("Error calculating swap output:", error);
+      setSwapToAmount("0");
+    }
+  }, [swapDirection]);
+
+  // Toggle swap direction
+  const toggleSwapDirection = () => {
+    setSwapDirection(prev => prev === "SUSD_TO_ETH" ? "ETH_TO_SUSD" : "SUSD_TO_ETH");
+    setSwapFromAmount("");
+    setSwapToAmount("");
+  };
 
   const handleClaim = async () => {
     if (!canClaim || !account) return;
@@ -311,11 +396,104 @@ export default function SimplePage() {
     }
   };
 
-  const handleSwap = () => {
-    if (!swapFromAmount) return;
-    const dummyHash = `0x${Math.random().toString(16).substring(2, 66)}`;
-    showTransactionSuccess(dummyHash);
-    setSwapFromAmount("");
+  const handleSwap = async () => {
+    if (!swapFromAmount || !account || isSwapLoading) return;
+
+    setIsSwapLoading(true);
+
+    try {
+      const amountIn = parseTokenAmount(swapFromAmount);
+      const minAmountOut = parseTokenAmount((parseFloat(swapToAmount) * 0.95).toString()); // 5% slippage tolerance
+      
+      let transaction;
+      let approvalTransaction;
+
+      if (swapDirection === "SUSD_TO_ETH") {
+        // Check and approve SUSD allowance
+        const allowance = await readContract({
+          contract: simpleUSDContract,
+          method: "function allowance(address,address) view returns (uint256)",
+          params: [account.address, CONTRACT_ADDRESSES.SIMPLE_SWAP],
+        });
+
+        if ((allowance as bigint) < amountIn) {
+          // Approve SUSD spending
+          approvalTransaction = prepareContractCall({
+            contract: simpleUSDContract,
+            method: "function approve(address,uint256) returns (bool)",
+            params: [CONTRACT_ADDRESSES.SIMPLE_SWAP, amountIn],
+          });
+
+          const approvalResult = await sendTransaction({
+            transaction: approvalTransaction,
+            account,
+          });
+          console.log("SUSD approval successful:", approvalResult.transactionHash);
+        }
+
+        // Execute SUSD -> MockETH swap
+        transaction = prepareContractCall({
+          contract: simpleSwapContract,
+          method: "function swapSUSDForMockETH(uint256 susdAmount, uint256 minMockETHOut)",
+          params: [amountIn, minAmountOut],
+        });
+      } else {
+        // Check and approve MockETH allowance
+        const allowance = await readContract({
+          contract: mockETHContract,
+          method: "function allowance(address,address) view returns (uint256)",
+          params: [account.address, CONTRACT_ADDRESSES.SIMPLE_SWAP],
+        });
+
+        if ((allowance as bigint) < amountIn) {
+          // Approve MockETH spending
+          approvalTransaction = prepareContractCall({
+            contract: mockETHContract,
+            method: "function approve(address,uint256) returns (bool)",
+            params: [CONTRACT_ADDRESSES.SIMPLE_SWAP, amountIn],
+          });
+
+          const approvalResult = await sendTransaction({
+            transaction: approvalTransaction,
+            account,
+          });
+          console.log("MockETH approval successful:", approvalResult.transactionHash);
+        }
+
+        // Execute MockETH -> SUSD swap
+        transaction = prepareContractCall({
+          contract: simpleSwapContract,
+          method: "function swapMockETHForSUSD(uint256 mockETHAmount, uint256 minSUSDOut)",
+          params: [amountIn, minAmountOut],
+        });
+      }
+
+      // Send swap transaction
+      const result = await sendTransaction({
+        transaction,
+        account,
+      });
+
+      // Show success
+      showTransactionSuccess(result.transactionHash);
+      console.log(`${swapDirection} swap successful!`);
+
+      // Reset form and reload data
+      setSwapFromAmount("");
+      setSwapToAmount("");
+      
+      // Reload balances and history after successful swap
+      setTimeout(async () => {
+        await loadBalances();
+        await loadSwapHistory();
+      }, 2000);
+
+    } catch (error) {
+      console.error("Swap failed:", error);
+      alert("Swap failed: " + (error as Error).message);
+    } finally {
+      setIsSwapLoading(false);
+    }
   };
 
   const handleStake = () => {
@@ -351,6 +529,21 @@ export default function SimplePage() {
     setCurrentEducationContent(content);
     setIsEducationModalOpen(true);
   };
+
+  // Load balances and history when account changes
+  useEffect(() => {
+    if (account) {
+      loadBalances();
+      loadSwapHistory();
+    }
+  }, [account, loadBalances, loadSwapHistory]);
+
+  // Calculate swap output when input changes
+  useEffect(() => {
+    if (swapFromAmount) {
+      calculateSwapOutput(swapFromAmount);
+    }
+  }, [swapFromAmount, swapDirection, calculateSwapOutput]);
 
   interface ResourceType {
     title: string;
@@ -625,7 +818,7 @@ export default function SimplePage() {
                     ✅ Claimed Successfully!
                   </motion.div>
                 ) : (
-                  <div className="px-12 py-4 bg-gray-400 text-white text-xl font-bold rounded-2xl cursor-not-allowed">
+                  <div className="px-8 py-4 bg-gray-400 text-white text-xl font-bold rounded-2xl cursor-not-allowed max-w-fit mx-auto">
                     Already Claimed Today
                   </div>
                 )}
@@ -800,7 +993,7 @@ export default function SimplePage() {
                     </label>
                     <div className="flex space-x-2">
                       <div className="px-3 py-2 border border-gray-300 rounded-lg bg-gray-50 text-gray-700 font-medium">
-                        SUSD
+                        {swapDirection === "SUSD_TO_ETH" ? "SUSD" : "MockETH"}
                       </div>
                       <input
                         type="number"
@@ -810,10 +1003,17 @@ export default function SimplePage() {
                         className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
                       />
                     </div>
+                    <div className="text-xs text-gray-500 mt-1">
+                      Balance: {swapDirection === "SUSD_TO_ETH" ? susdBalance : mockEthBalance} {swapDirection === "SUSD_TO_ETH" ? "SUSD" : "MockETH"}
+                    </div>
                   </div>
 
                   <div className="flex justify-center">
-                    <button className="p-2 bg-gray-100 rounded-full hover:bg-gray-200 transition-colors cursor-pointer">
+                    <button 
+                      onClick={toggleSwapDirection}
+                      className="p-2 bg-gray-100 rounded-full hover:bg-gray-200 transition-colors cursor-pointer"
+                      title="Switch tokens"
+                    >
                       ↓
                     </button>
                   </div>
@@ -824,24 +1024,23 @@ export default function SimplePage() {
                     </label>
                     <div className="flex space-x-2">
                       <div className="px-3 py-2 border border-gray-300 rounded-lg bg-gray-50 text-gray-700 font-medium">
-                        ETH
+                        {swapDirection === "SUSD_TO_ETH" ? "MockETH" : "SUSD"}
                       </div>
                       <input
                         type="text"
                         placeholder="0.0"
-                        value={
-                          swapFromAmount
-                            ? (parseFloat(swapFromAmount) * swapRate).toFixed(6)
-                            : ""
-                        }
+                        value={swapToAmount}
                         readOnly
                         className="flex-1 px-3 py-2 border border-gray-300 rounded-lg bg-gray-50"
                       />
                     </div>
+                    <div className="text-xs text-gray-500 mt-1">
+                      Balance: {swapDirection === "SUSD_TO_ETH" ? mockEthBalance : susdBalance} {swapDirection === "SUSD_TO_ETH" ? "MockETH" : "SUSD"}
+                    </div>
                   </div>
 
                   <div className="text-sm text-gray-600 text-center">
-                    Rate: 1 SUSD = {swapRate} ETH (ETH @ $4,000)
+                    Rate: 1 {swapDirection === "SUSD_TO_ETH" ? "SUSD = 0.00025 MockETH" : "MockETH = 4000 SUSD"} | Fee: 0.3%
                   </div>
 
                   <div className="relative group">
@@ -852,10 +1051,10 @@ export default function SimplePage() {
                       whileTap={{
                         scale: isWalletConnected && swapFromAmount ? 0.98 : 1,
                       }}
-                      onClick={isWalletConnected ? handleSwap : undefined}
-                      disabled={!isWalletConnected || !swapFromAmount}
+                      onClick={isWalletConnected && !isSwapLoading ? handleSwap : undefined}
+                      disabled={!isWalletConnected || !swapFromAmount || isSwapLoading}
                       className="w-full py-3 bg-purple-600 text-white font-bold rounded-lg hover:bg-purple-700 disabled:bg-gray-300 transition-colors cursor-pointer disabled:cursor-not-allowed">
-                      Swap SUSD to ETH
+                      {isSwapLoading ? "Swapping..." : `Swap ${swapDirection === "SUSD_TO_ETH" ? "SUSD → MockETH" : "MockETH → SUSD"}`}
                     </motion.button>
                     {!isWalletConnected && (
                       <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none">
@@ -886,18 +1085,30 @@ export default function SimplePage() {
                 Recent Swaps
               </h3>
               <div className="space-y-2">
-                <div className="flex justify-between items-center py-2 border-b border-gray-100">
-                  <span className="text-gray-600">1000 SUSD → 0.25 ETH</span>
-                  <span className="text-sm text-green-600">Completed</span>
-                </div>
-                <div className="flex justify-between items-center py-2 border-b border-gray-100">
-                  <span className="text-gray-600">500 SUSD → 0.125 ETH</span>
-                  <span className="text-sm text-green-600">Completed</span>
-                </div>
-                <div className="flex justify-between items-center py-2">
-                  <span className="text-gray-600">250 SUSD → 0.0625 ETH</span>
-                  <span className="text-sm text-green-600">Completed</span>
-                </div>
+                {swapHistory.length > 0 ? (
+                  swapHistory.map((swap, index) => {
+                    const isFromSUSD = swap[1].toLowerCase() === CONTRACT_ADDRESSES.SIMPLE_USD.toLowerCase();
+                    const fromToken = isFromSUSD ? "SUSD" : "MockETH";
+                    const toToken = isFromSUSD ? "MockETH" : "SUSD";
+                    const fromAmount = formatTokenAmount(swap[3]);
+                    const toAmount = formatTokenAmount(swap[4]);
+                    const timestamp = new Date(Number(swap[5]) * 1000).toLocaleDateString();
+                    
+                    return (
+                      <div key={index} className="flex justify-between items-center py-2 border-b border-gray-100">
+                        <div>
+                          <span className="text-gray-600">{fromAmount} {fromToken} → {toAmount} {toToken}</span>
+                          <div className="text-xs text-gray-400">{timestamp}</div>
+                        </div>
+                        <span className="text-sm text-green-600">Completed</span>
+                      </div>
+                    );
+                  })
+                ) : (
+                  <div className="text-center py-4 text-gray-500">
+                    No recent swaps found
+                  </div>
+                )}
               </div>
             </div>
           </motion.div>
