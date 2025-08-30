@@ -240,31 +240,6 @@ export default function SimplePage() {
     setShowTransactionModal(true);
   };
 
-  const addSUSDToMetaMask = async () => {
-    if (!window.ethereum) {
-      alert("MetaMask not detected. Please install MetaMask extension.");
-      return;
-    }
-
-    try {
-      await window.ethereum.request({
-        method: 'wallet_watchAsset',
-        params: {
-          type: 'ERC20',
-          options: {
-            address: CONTRACT_ADDRESSES.SIMPLE_USD,
-            symbol: 'SUSD',
-            decimals: 18,
-            image: 'https://via.placeholder.com/64x64/22c55e/ffffff?text=SUSD', // Green SUSD icon
-          },
-        },
-      });
-      alert("SUSD token added to MetaMask successfully!");
-    } catch (error) {
-      console.error("Error adding token to MetaMask:", error);
-      alert("Failed to add token to MetaMask. Please try again.");
-    }
-  };
 
   const handleClaim = async () => {
     if (!canClaim || !account) return;
@@ -288,6 +263,9 @@ export default function SimplePage() {
       // Show success
       setClaimed(true);
       showTransactionSuccess(result.transactionHash);
+      
+      // Force token refresh for Thirdweb wallet (tokens should auto-detect after transaction)
+      console.log("SUSD claim successful! Token should now appear in Thirdweb View Assets");
       
       // Update achievements
       const now = Date.now();
@@ -542,13 +520,6 @@ export default function SimplePage() {
               </div>
             </div>
             <div className="flex items-center space-x-4">
-              <button
-                onClick={addSUSDToMetaMask}
-                className="flex items-center px-3 py-1 bg-orange-100 text-orange-700 rounded-full text-sm font-medium hover:bg-orange-200 transition-colors cursor-pointer"
-                title="Add SUSD to MetaMask">
-                <span className="mr-1">🦊</span>
-                Add SUSD to MetaMask
-              </button>
               <div className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-sm font-medium">
                 Testnet
               </div>
