@@ -1,0 +1,496 @@
+{
+  "abi": [
+    {
+      "type": "constructor",
+      "inputs": [
+        { "name": "_susdToken", "type": "address", "internalType": "address" },
+        {
+          "name": "_mockETHToken",
+          "type": "address",
+          "internalType": "address"
+        }
+      ],
+      "stateMutability": "nonpayable"
+    },
+    {
+      "type": "function",
+      "name": "FEE_DENOMINATOR",
+      "inputs": [],
+      "outputs": [{ "name": "", "type": "uint256", "internalType": "uint256" }],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "MOCKETH_TO_SUSD_RATE",
+      "inputs": [],
+      "outputs": [{ "name": "", "type": "uint256", "internalType": "uint256" }],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "RATE_DENOMINATOR",
+      "inputs": [],
+      "outputs": [{ "name": "", "type": "uint256", "internalType": "uint256" }],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "SUSD_TO_MOCKETH_RATE",
+      "inputs": [],
+      "outputs": [{ "name": "", "type": "uint256", "internalType": "uint256" }],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "SWAP_FEE_PERCENT",
+      "inputs": [],
+      "outputs": [{ "name": "", "type": "uint256", "internalType": "uint256" }],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "addLiquidity",
+      "inputs": [
+        { "name": "susdAmount", "type": "uint256", "internalType": "uint256" },
+        {
+          "name": "mockETHAmount",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "outputs": [],
+      "stateMutability": "nonpayable"
+    },
+    {
+      "type": "function",
+      "name": "calculateMockETHOutput",
+      "inputs": [
+        { "name": "susdAmount", "type": "uint256", "internalType": "uint256" }
+      ],
+      "outputs": [
+        {
+          "name": "mockETHOutput",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "stateMutability": "pure"
+    },
+    {
+      "type": "function",
+      "name": "calculateSUSDOutput",
+      "inputs": [
+        {
+          "name": "mockETHAmount",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "outputs": [
+        { "name": "susdOutput", "type": "uint256", "internalType": "uint256" }
+      ],
+      "stateMutability": "pure"
+    },
+    {
+      "type": "function",
+      "name": "emergencyWithdraw",
+      "inputs": [
+        { "name": "token", "type": "address", "internalType": "address" },
+        { "name": "amount", "type": "uint256", "internalType": "uint256" }
+      ],
+      "outputs": [],
+      "stateMutability": "nonpayable"
+    },
+    {
+      "type": "function",
+      "name": "getPoolLiquidity",
+      "inputs": [],
+      "outputs": [
+        { "name": "susdAmount", "type": "uint256", "internalType": "uint256" },
+        {
+          "name": "mockETHAmount",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "getRecentSwaps",
+      "inputs": [
+        { "name": "limit", "type": "uint256", "internalType": "uint256" }
+      ],
+      "outputs": [
+        {
+          "name": "transactions",
+          "type": "tuple[]",
+          "internalType": "struct SimpleSwap.SwapTransaction[]",
+          "components": [
+            { "name": "user", "type": "address", "internalType": "address" },
+            { "name": "tokenIn", "type": "address", "internalType": "address" },
+            {
+              "name": "tokenOut",
+              "type": "address",
+              "internalType": "address"
+            },
+            {
+              "name": "amountIn",
+              "type": "uint256",
+              "internalType": "uint256"
+            },
+            {
+              "name": "amountOut",
+              "type": "uint256",
+              "internalType": "uint256"
+            },
+            {
+              "name": "timestamp",
+              "type": "uint256",
+              "internalType": "uint256"
+            },
+            {
+              "name": "blockNumber",
+              "type": "uint256",
+              "internalType": "uint256"
+            }
+          ]
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "getSwapQuoteMockETHToSUSD",
+      "inputs": [
+        {
+          "name": "mockETHAmount",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "outputs": [
+        { "name": "susdOut", "type": "uint256", "internalType": "uint256" },
+        { "name": "swapFee", "type": "uint256", "internalType": "uint256" }
+      ],
+      "stateMutability": "pure"
+    },
+    {
+      "type": "function",
+      "name": "getSwapQuoteSUSDToMockETH",
+      "inputs": [
+        { "name": "susdAmount", "type": "uint256", "internalType": "uint256" }
+      ],
+      "outputs": [
+        { "name": "mockETHOut", "type": "uint256", "internalType": "uint256" },
+        { "name": "swapFee", "type": "uint256", "internalType": "uint256" }
+      ],
+      "stateMutability": "pure"
+    },
+    {
+      "type": "function",
+      "name": "getTotalSwapCount",
+      "inputs": [],
+      "outputs": [
+        { "name": "count", "type": "uint256", "internalType": "uint256" }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "getUserSwapHistory",
+      "inputs": [
+        { "name": "user", "type": "address", "internalType": "address" },
+        { "name": "limit", "type": "uint256", "internalType": "uint256" }
+      ],
+      "outputs": [
+        {
+          "name": "transactions",
+          "type": "tuple[]",
+          "internalType": "struct SimpleSwap.SwapTransaction[]",
+          "components": [
+            { "name": "user", "type": "address", "internalType": "address" },
+            { "name": "tokenIn", "type": "address", "internalType": "address" },
+            {
+              "name": "tokenOut",
+              "type": "address",
+              "internalType": "address"
+            },
+            {
+              "name": "amountIn",
+              "type": "uint256",
+              "internalType": "uint256"
+            },
+            {
+              "name": "amountOut",
+              "type": "uint256",
+              "internalType": "uint256"
+            },
+            {
+              "name": "timestamp",
+              "type": "uint256",
+              "internalType": "uint256"
+            },
+            {
+              "name": "blockNumber",
+              "type": "uint256",
+              "internalType": "uint256"
+            }
+          ]
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "mockETHLiquidity",
+      "inputs": [],
+      "outputs": [{ "name": "", "type": "uint256", "internalType": "uint256" }],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "mockETHToken",
+      "inputs": [],
+      "outputs": [
+        { "name": "", "type": "address", "internalType": "contract IERC20" }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "owner",
+      "inputs": [],
+      "outputs": [{ "name": "", "type": "address", "internalType": "address" }],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "renounceOwnership",
+      "inputs": [],
+      "outputs": [],
+      "stateMutability": "nonpayable"
+    },
+    {
+      "type": "function",
+      "name": "susdLiquidity",
+      "inputs": [],
+      "outputs": [{ "name": "", "type": "uint256", "internalType": "uint256" }],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "susdToken",
+      "inputs": [],
+      "outputs": [
+        { "name": "", "type": "address", "internalType": "contract IERC20" }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "swapHistory",
+      "inputs": [{ "name": "", "type": "uint256", "internalType": "uint256" }],
+      "outputs": [
+        { "name": "user", "type": "address", "internalType": "address" },
+        { "name": "tokenIn", "type": "address", "internalType": "address" },
+        { "name": "tokenOut", "type": "address", "internalType": "address" },
+        { "name": "amountIn", "type": "uint256", "internalType": "uint256" },
+        { "name": "amountOut", "type": "uint256", "internalType": "uint256" },
+        { "name": "timestamp", "type": "uint256", "internalType": "uint256" },
+        { "name": "blockNumber", "type": "uint256", "internalType": "uint256" }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "swapMockETHForSUSD",
+      "inputs": [
+        {
+          "name": "mockETHAmount",
+          "type": "uint256",
+          "internalType": "uint256"
+        },
+        { "name": "minSUSDOut", "type": "uint256", "internalType": "uint256" }
+      ],
+      "outputs": [],
+      "stateMutability": "nonpayable"
+    },
+    {
+      "type": "function",
+      "name": "swapSUSDForMockETH",
+      "inputs": [
+        { "name": "susdAmount", "type": "uint256", "internalType": "uint256" },
+        {
+          "name": "minMockETHOut",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "outputs": [],
+      "stateMutability": "nonpayable"
+    },
+    {
+      "type": "function",
+      "name": "transferOwnership",
+      "inputs": [
+        { "name": "newOwner", "type": "address", "internalType": "address" }
+      ],
+      "outputs": [],
+      "stateMutability": "nonpayable"
+    },
+    {
+      "type": "function",
+      "name": "userSwapIndices",
+      "inputs": [
+        { "name": "", "type": "address", "internalType": "address" },
+        { "name": "", "type": "uint256", "internalType": "uint256" }
+      ],
+      "outputs": [{ "name": "", "type": "uint256", "internalType": "uint256" }],
+      "stateMutability": "view"
+    },
+    {
+      "type": "event",
+      "name": "LiquidityAdded",
+      "inputs": [
+        {
+          "name": "provider",
+          "type": "address",
+          "indexed": true,
+          "internalType": "address"
+        },
+        {
+          "name": "susdAmount",
+          "type": "uint256",
+          "indexed": false,
+          "internalType": "uint256"
+        },
+        {
+          "name": "mockETHAmount",
+          "type": "uint256",
+          "indexed": false,
+          "internalType": "uint256"
+        },
+        {
+          "name": "timestamp",
+          "type": "uint256",
+          "indexed": false,
+          "internalType": "uint256"
+        }
+      ],
+      "anonymous": false
+    },
+    {
+      "type": "event",
+      "name": "OwnershipTransferred",
+      "inputs": [
+        {
+          "name": "previousOwner",
+          "type": "address",
+          "indexed": true,
+          "internalType": "address"
+        },
+        {
+          "name": "newOwner",
+          "type": "address",
+          "indexed": true,
+          "internalType": "address"
+        }
+      ],
+      "anonymous": false
+    },
+    {
+      "type": "event",
+      "name": "SwapExecuted",
+      "inputs": [
+        {
+          "name": "user",
+          "type": "address",
+          "indexed": true,
+          "internalType": "address"
+        },
+        {
+          "name": "tokenIn",
+          "type": "address",
+          "indexed": true,
+          "internalType": "address"
+        },
+        {
+          "name": "tokenOut",
+          "type": "address",
+          "indexed": true,
+          "internalType": "address"
+        },
+        {
+          "name": "amountIn",
+          "type": "uint256",
+          "indexed": false,
+          "internalType": "uint256"
+        },
+        {
+          "name": "amountOut",
+          "type": "uint256",
+          "indexed": false,
+          "internalType": "uint256"
+        },
+        {
+          "name": "fee",
+          "type": "uint256",
+          "indexed": false,
+          "internalType": "uint256"
+        },
+        {
+          "name": "timestamp",
+          "type": "uint256",
+          "indexed": false,
+          "internalType": "uint256"
+        }
+      ],
+      "anonymous": false
+    },
+    {
+      "type": "event",
+      "name": "SwapFailed",
+      "inputs": [
+        {
+          "name": "user",
+          "type": "address",
+          "indexed": true,
+          "internalType": "address"
+        },
+        {
+          "name": "reason",
+          "type": "string",
+          "indexed": false,
+          "internalType": "string"
+        }
+      ],
+      "anonymous": false
+    },
+    {
+      "type": "error",
+      "name": "OwnableInvalidOwner",
+      "inputs": [
+        { "name": "owner", "type": "address", "internalType": "address" }
+      ]
+    },
+    {
+      "type": "error",
+      "name": "OwnableUnauthorizedAccount",
+      "inputs": [
+        { "name": "account", "type": "address", "internalType": "address" }
+      ]
+    },
+    { "type": "error", "name": "ReentrancyGuardReentrantCall", "inputs": [] },
+    { "type": "error", "name": "SimpleSwap__InsufficientAmount", "inputs": [] },
+    {
+      "type": "error",
+      "name": "SimpleSwap__InsufficientLiquidity",
+      "inputs": []
+    },
+    { "type": "error", "name": "SimpleSwap__InvalidToken", "inputs": [] },
+    { "type": "error", "name": "SimpleSwap__SlippageExceeded", "inputs": [] },
+    { "type": "error", "name": "SimpleSwap__TransferFailed", "inputs": [] },
+    { "type": "error", "name": "SimpleSwap__ZeroAddress", "inputs": [] }
+  ]
+}

@@ -16,6 +16,8 @@ import Link from "next/link";
 import ConnectWallet from "@/components/ConnectWallet";
 import AIChat from "@/components/AIChat";
 import { useActiveAccount } from "thirdweb/react";
+import { readContract, sendTransaction, prepareContractCall } from "thirdweb";
+import { simpleUSDContract, formatTokenAmount, CONTRACT_ADDRESSES } from "@/lib/contracts";
 
 interface UserAchievements {
   firstClaim: boolean;
@@ -23,6 +25,26 @@ interface UserAchievements {
   defiExplorer: number; // tabs used (max 6)
   lastClaimDate: string;
   nextClaimTime: number; // timestamp
+}
+
+// TypeScript declaration for MetaMask
+declare global {
+  interface Window {
+    ethereum?: {
+      request: (args: { 
+        method: string; 
+        params?: {
+          type: string;
+          options: {
+            address: string;
+            symbol: string;
+            decimals: number;
+            image: string;
+          };
+        };
+      }) => Promise<unknown>;
+    };
+  }
 }
 
 export default function SimplePage() {
@@ -49,6 +71,8 @@ export default function SimplePage() {
     nextClaimTime: 0,
   });
   const [canClaim, setCanClaim] = useState(true);
+  const [susdBalance, setSusdBalance] = useState("0");
+  const [isClaimLoading, setIsClaimLoading] = useState(false);
 
   // Swap state
   const [swapFromAmount, setSwapFromAmount] = useState("");
@@ -82,6 +106,29 @@ export default function SimplePage() {
     { id: "mint", name: "Mint", icon: FiImage, active: true },
     { id: "bridge", name: "Bridge", icon: FiLink, active: true },
   ];
+
+  // Countdown timer function
+  const updateCountdown = (nextClaimTime: number) => {
+    const interval = setInterval(() => {
+      const now = Date.now();
+      const timeDiff = nextClaimTime - now;
+
+      if (timeDiff <= 0) {
+        setCanClaim(true);
+        setTimeLeft({ hours: 0, minutes: 0, seconds: 0 });
+        clearInterval(interval);
+      } else {
+        const hours = Math.floor(timeDiff / (1000 * 60 * 60));
+        const minutes = Math.floor(
+          (timeDiff % (1000 * 60 * 60)) / (1000 * 60)
+        );
+        const seconds = Math.floor((timeDiff % (1000 * 60)) / 1000);
+        setTimeLeft({ hours, minutes, seconds });
+      }
+    }, 1000);
+
+    return interval;
+  };
 
   // Initialize localStorage data and countdown timer
   useEffect(() => {
@@ -117,30 +164,45 @@ export default function SimplePage() {
       }
     };
 
-    const updateCountdown = (nextClaimTime: number) => {
-      const interval = setInterval(() => {
-        const now = Date.now();
-        const timeDiff = nextClaimTime - now;
-
-        if (timeDiff <= 0) {
-          setCanClaim(true);
-          setTimeLeft({ hours: 0, minutes: 0, seconds: 0 });
-          clearInterval(interval);
-        } else {
-          const hours = Math.floor(timeDiff / (1000 * 60 * 60));
-          const minutes = Math.floor(
-            (timeDiff % (1000 * 60 * 60)) / (1000 * 60)
-          );
-          const seconds = Math.floor((timeDiff % (1000 * 60)) / 1000);
-          setTimeLeft({ hours, minutes, seconds });
-        }
-      }, 1000);
-
-      return interval;
-    };
-
     initializeUserData();
   }, []);
+
+  // Fetch contract data when wallet connected
+  useEffect(() => {
+    const fetchContractData = async () => {
+      if (!account?.address) return;
+      
+      try {
+        // Check SUSD balance
+        const balance = await readContract({
+          contract: simpleUSDContract,
+          method: "function balanceOf(address) view returns (uint256)",
+          params: [account.address],
+        });
+        setSusdBalance(formatTokenAmount(balance as bigint));
+
+        // Check airdrop eligibility
+        const result = await readContract({
+          contract: simpleUSDContract,
+          method: "function canClaimAirdrop(address) view returns (bool, uint256)",
+          params: [account.address],
+        });
+        const [canClaimContract, timeLeft] = result as [boolean, bigint];
+        
+        setCanClaim(canClaimContract);
+        
+        // If can't claim, set up countdown
+        if (!canClaimContract && timeLeft > 0) {
+          const nextClaimTime = Date.now() + Number(timeLeft) * 1000;
+          updateCountdown(nextClaimTime);
+        }
+      } catch (error) {
+        console.error("Error fetching contract data:", error);
+      }
+    };
+
+    fetchContractData();
+  }, [account?.address]);
 
   // Track tab usage for DeFi Explorer achievement
   useEffect(() => {
@@ -178,61 +240,97 @@ export default function SimplePage() {
     setShowTransactionModal(true);
   };
 
-  const handleClaim = () => {
-    if (!canClaim) return;
+  const addSUSDToMetaMask = async () => {
+    if (!window.ethereum) {
+      alert("MetaMask not detected. Please install MetaMask extension.");
+      return;
+    }
 
-    setClaimed(true);
-    const now = Date.now();
-    const nextClaim = now + 24 * 60 * 60 * 1000; // 24 hours from now
-    const today = new Date().toDateString();
+    try {
+      await window.ethereum.request({
+        method: 'wallet_watchAsset',
+        params: {
+          type: 'ERC20',
+          options: {
+            address: CONTRACT_ADDRESSES.SIMPLE_USD,
+            symbol: 'SUSD',
+            decimals: 18,
+            image: 'https://via.placeholder.com/64x64/22c55e/ffffff?text=SUSD', // Green SUSD icon
+          },
+        },
+      });
+      alert("SUSD token added to MetaMask successfully!");
+    } catch (error) {
+      console.error("Error adding token to MetaMask:", error);
+      alert("Failed to add token to MetaMask. Please try again.");
+    }
+  };
 
-    // Update achievements
-    const updatedAchievements: UserAchievements = {
-      ...achievements,
-      firstClaim: true,
-      dailyClaimer:
-        achievements.lastClaimDate ===
-        new Date(now - 24 * 60 * 60 * 1000).toDateString()
-          ? achievements.dailyClaimer + 1
-          : 1,
-      lastClaimDate: today,
-      nextClaimTime: nextClaim,
-    };
+  const handleClaim = async () => {
+    if (!canClaim || !account) return;
 
-    setAchievements(updatedAchievements);
-    localStorage.setItem(
-      "defiSimple_achievements",
-      JSON.stringify(updatedAchievements)
-    );
+    setIsClaimLoading(true);
 
-    // Set countdown for next claim
-    setCanClaim(false);
-    const updateCountdown = (nextClaimTime: number) => {
-      const interval = setInterval(() => {
-        const currentTime = Date.now();
-        const timeDiff = nextClaimTime - currentTime;
+    try {
+      // Prepare the claim transaction
+      const transaction = prepareContractCall({
+        contract: simpleUSDContract,
+        method: "function claimAirdrop()",
+        params: [],
+      });
 
-        if (timeDiff <= 0) {
-          setCanClaim(true);
-          setTimeLeft({ hours: 0, minutes: 0, seconds: 0 });
-          clearInterval(interval);
-        } else {
-          const hours = Math.floor(timeDiff / (1000 * 60 * 60));
-          const minutes = Math.floor(
-            (timeDiff % (1000 * 60 * 60)) / (1000 * 60)
-          );
-          const seconds = Math.floor((timeDiff % (1000 * 60)) / 1000);
-          setTimeLeft({ hours, minutes, seconds });
-        }
-      }, 1000);
-    };
+      // Send transaction
+      const result = await sendTransaction({
+        transaction,
+        account,
+      });
 
-    updateCountdown(nextClaim);
+      // Show success
+      setClaimed(true);
+      showTransactionSuccess(result.transactionHash);
+      
+      // Update achievements
+      const now = Date.now();
+      const today = new Date().toDateString();
+      const updatedAchievements: UserAchievements = {
+        ...achievements,
+        firstClaim: true,
+        dailyClaimer:
+          achievements.lastClaimDate ===
+          new Date(now - 24 * 60 * 60 * 1000).toDateString()
+            ? achievements.dailyClaimer + 1
+            : 1,
+        lastClaimDate: today,
+        nextClaimTime: now + 24 * 60 * 60 * 1000, // 24 hours cooldown
+      };
 
-    // Generate dummy transaction hash
-    const dummyHash = `0x${Math.random().toString(16).substring(2, 66)}`;
-    showTransactionSuccess(dummyHash);
-    setTimeout(() => setClaimed(false), 3000);
+      setAchievements(updatedAchievements);
+      localStorage.setItem(
+        "defiSimple_achievements",
+        JSON.stringify(updatedAchievements)
+      );
+
+      // Update balance after successful claim
+      setTimeout(async () => {
+        const balance = await readContract({
+          contract: simpleUSDContract,
+          method: "function balanceOf(address) view returns (uint256)",
+          params: [account.address],
+        });
+        setSusdBalance(formatTokenAmount(balance as bigint));
+      }, 2000);
+
+      // Set cooldown
+      setCanClaim(false);
+      updateCountdown(now + 24 * 60 * 60 * 1000);
+      setTimeout(() => setClaimed(false), 3000);
+
+    } catch (error) {
+      console.error("Claim failed:", error);
+      alert("Claim failed: " + (error as Error).message);
+    } finally {
+      setIsClaimLoading(false);
+    }
   };
 
   const handleSwap = () => {
@@ -444,6 +542,13 @@ export default function SimplePage() {
               </div>
             </div>
             <div className="flex items-center space-x-4">
+              <button
+                onClick={addSUSDToMetaMask}
+                className="flex items-center px-3 py-1 bg-orange-100 text-orange-700 rounded-full text-sm font-medium hover:bg-orange-200 transition-colors cursor-pointer"
+                title="Add SUSD to MetaMask">
+                <span className="mr-1">🦊</span>
+                Add SUSD to MetaMask
+              </button>
               <div className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-sm font-medium">
                 Testnet
               </div>
@@ -508,10 +613,16 @@ export default function SimplePage() {
                   Free SimpleUSD Airdrop
                 </h1>
 
-                <p className="text-xl text-gray-600 mb-8 max-w-2xl mx-auto">
+                <p className="text-xl text-gray-600 mb-4 max-w-2xl mx-auto">
                   Claim your free 1000 SUSD tokens to start your DeFi journey.
                   No gas fees, no complexity!
                 </p>
+
+                {isWalletConnected && (
+                  <p className="text-lg text-green-600 mb-4 font-semibold">
+                    Your SUSD Balance: {susdBalance} SUSD
+                  </p>
+                )}
 
                 {canClaim ? (
                   <div className="relative group">
@@ -519,13 +630,13 @@ export default function SimplePage() {
                       whileHover={{ scale: isWalletConnected ? 1.05 : 1 }}
                       whileTap={{ scale: isWalletConnected ? 0.95 : 1 }}
                       onClick={isWalletConnected ? handleClaim : undefined}
-                      disabled={!isWalletConnected}
+                      disabled={!isWalletConnected || isClaimLoading}
                       className={`px-12 py-4 text-white text-xl font-bold rounded-2xl transition-all duration-300 ${
-                        isWalletConnected
+                        isWalletConnected && !isClaimLoading
                           ? "bg-gradient-to-r from-green-600 to-emerald-600 hover:shadow-xl cursor-pointer"
                           : "bg-gray-400 cursor-not-allowed"
                       }`}>
-                      Claim 1000 SUSD
+                      {isClaimLoading ? "Claiming..." : "Claim 1000 SUSD"}
                     </motion.button>
                     {!isWalletConnected && (
                       <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none">
