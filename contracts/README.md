@@ -6,24 +6,24 @@ SimpleUSD: `0x5FbDB2315678afecb367f032d93F642f64180aa3`
 
 MockETH: `0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512`
 
-SimpleSwap: `0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9`
+SimpleSwap: `0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0`
 
-SimpleNFT: `0x5FC8d32690cc91D4c39d9d3abcBD16989F875707`
+SimpleNFT: `0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9`
 
-SimpleStake: `0x0165878A594ca255338adfa4d48449f69242Eb8F`
+SimpleStake: `0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9`
 
-SimpleLend: `0xa513E6E4b8f2a923D98304ec87F64353C4D5C853`
+SimpleLend: `0x5FC8d32690cc91D4c39d9d3abcBD16989F875707`
 
 ## Sepolia Testnet
 
-SimpleUSD: Pending deployment...
+SimpleUSD: [`0x57C33213aE6FE2fC0b9c5d74c475F1d496A66836`](https://sepolia.etherscan.io/address/0x57c33213ae6fe2fc0b9c5d74c475f1d496a66836)
 
-MockETH: Pending deployment...
+MockETH: [`0xE4a44C989Ca39AF437C5dE4ADbcF02BcAbdE0595`](https://sepolia.etherscan.io/address/0xe4a44c989ca39af437c5de4adbcf02bcabde0595)
 
-SimpleSwap: Pending deployment...
+SimpleSwap: [`0x0704aE35C1747D9d9dca59B143a362A6A95B8371`](https://sepolia.etherscan.io/address/0x0704ae35c1747d9d9dca59b143a362a6a95b8371)
 
-SimpleNFT: Pending deployment...
+SimpleNFT: [`0x17941192b08E05546FC45C19C20963324ac6967D`](https://sepolia.etherscan.io/address/0x17941192b08e05546fc45c19c20963324ac6967d)
 
-SimpleStake: Pending deployment...
+SimpleStake: [`0x9F68f3E960033F61141E0C3ae199683DFe4a5e06`](https://sepolia.etherscan.io/address/0x9f68f3e960033f61141e0c3ae199683dfe4a5e06)
 
-SimpleLend: Pending deployment...
+SimpleLend: [`0xf7A37382D440d2E619E2bd88784B28c7F3f6bA10`](https://sepolia.etherscan.io/address/0xf7a37382d440d2e619e2bd88784b28c7f3f6ba10)
