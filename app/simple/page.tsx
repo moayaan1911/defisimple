@@ -17,7 +17,7 @@ import ConnectWallet from "@/components/ConnectWallet";
 import AIChat from "@/components/AIChat";
 import { useActiveAccount } from "thirdweb/react";
 import { readContract, sendTransaction, prepareContractCall } from "thirdweb";
-import { simpleUSDContract, simpleSwapContract, mockETHContract, simpleStakeContract, formatTokenAmount, parseTokenAmount, CONTRACT_ADDRESSES } from "@/lib/contracts";
+import { simpleUSDContract, simpleSwapContract, mockETHContract, simpleStakeContract, simpleLendContract, formatTokenAmount, parseTokenAmount, CONTRACT_ADDRESSES } from "@/lib/contracts";
 
 interface UserAchievements {
   firstClaim: boolean;
@@ -97,8 +97,17 @@ export default function SimplePage() {
 
   // Lend state
   const [lendAmount, setLendAmount] = useState("");
-  const [lentBalance] = useState(2000);
-  const [lendingEarned] = useState(80.25);
+  const [lentBalance, setLentBalance] = useState(0);
+  const [lendingEarned, setLendingEarned] = useState(0);
+  const [isLendLoading, setIsLendLoading] = useState(false);
+  const [isWithdrawLoading, setIsWithdrawLoading] = useState(false);
+  const [lendingStats, setLendingStats] = useState({
+    totalLent: 0,
+    totalLenders: 0,
+    apy: 8,
+    availableInterest: 0,
+    utilizationRate: 0
+  });
 
   // Mint state
   const [nftName, setNftName] = useState("");
@@ -710,11 +719,212 @@ export default function SimplePage() {
     }
   };
 
-  const handleLend = () => {
-    if (!lendAmount) return;
-    const dummyHash = `0x${Math.random().toString(16).substring(2, 66)}`;
-    showTransactionSuccess(dummyHash);
-    setLendAmount("");
+  // Load lending data
+  const loadLendingData = useCallback(async () => {
+    if (!account) return;
+    
+    try {
+      // Get user's lending info
+      const lendInfo = await readContract({
+        contract: simpleLendContract,
+        method: "function getLendInfo(address) view returns (uint256,uint256,uint256,uint256)",
+        params: [account.address],
+      });
+      const [deposited, earned] = lendInfo as [bigint, bigint, bigint, bigint];
+      
+      setLentBalance(Number(formatTokenAmount(deposited)));
+      setLendingEarned(Number(formatTokenAmount(earned)));
+
+      // Get pool statistics
+      const poolData = await readContract({
+        contract: simpleLendContract,
+        method: "function getPoolStats() view returns (uint256,uint256,uint256,uint256,uint256)",
+        params: [],
+      });
+      const [totalLentAmount, totalLenders, poolApy, availableInterest, utilizationRate] = poolData as [bigint, bigint, bigint, bigint, bigint];
+      
+      setLendingStats({
+        totalLent: Number(formatTokenAmount(totalLentAmount)),
+        totalLenders: Number(totalLenders),
+        apy: Number(poolApy),
+        availableInterest: Number(formatTokenAmount(availableInterest)),
+        utilizationRate: Number(utilizationRate)
+      });
+    } catch (error) {
+      console.error("Error loading lending data:", error);
+    }
+  }, [account]);
+
+  const handleLend = async () => {
+    if (!lendAmount || !account) return;
+    
+    try {
+      setIsLendLoading(true);
+      const lendAmountWei = parseTokenAmount(lendAmount);
+      
+      // Check current allowance first
+      const currentAllowance = await readContract({
+        contract: simpleUSDContract,
+        method: "function allowance(address,address) view returns (uint256)",
+        params: [account.address, CONTRACT_ADDRESSES.SIMPLE_LEND],
+      });
+      
+      // Only approve if needed
+      if (currentAllowance < lendAmountWei) {
+        console.log("Approving SUSD spending for lending...");
+        const approveTransaction = prepareContractCall({
+          contract: simpleUSDContract,
+          method: "function approve(address,uint256) returns (bool)",
+          params: [CONTRACT_ADDRESSES.SIMPLE_LEND, lendAmountWei],
+        });
+        
+        await sendTransaction({
+          transaction: approveTransaction,
+          account: account,
+        });
+        
+        // Wait a moment for approval to be confirmed
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      }
+
+      // Then deposit/lend
+      console.log("Depositing SUSD to lending pool...");
+      const lendTransaction = prepareContractCall({
+        contract: simpleLendContract,
+        method: "function deposit(uint256)",
+        params: [lendAmountWei],
+      });
+      
+      const result = await sendTransaction({
+        transaction: lendTransaction,
+        account: account,
+      });
+      
+      showTransactionSuccess(result.transactionHash);
+      setLendAmount("");
+      
+      // Reload data after a delay
+      setTimeout(async () => {
+        await Promise.all([loadBalances(), loadLendingData()]);
+      }, 3000);
+      
+    } catch (error: unknown) {
+      console.error("Lending failed:", error);
+      
+      // More user-friendly error messages
+      let errorMessage = "Lending failed. Please try again.";
+      
+      if (error instanceof Error) {
+        if (error.message.includes("User rejected")) {
+          errorMessage = "Transaction was cancelled by user.";
+        } else if (error.message.includes("insufficient funds")) {
+          errorMessage = "Insufficient ETH for gas fees.";
+        } else if (error.message.includes("gas")) {
+          errorMessage = "Gas estimation failed. Try reducing the amount or try again later.";
+        } else if (error.message.includes("500")) {
+          errorMessage = "Network error. Please try again in a moment.";
+        }
+      }
+      
+      alert(errorMessage);
+    } finally {
+      setIsLendLoading(false);
+    }
+  };
+
+  const handleWithdraw = async (amount?: string) => {
+    if (!account) return;
+    
+    try {
+      setIsWithdrawLoading(true);
+      const withdrawAmount = amount ? parseTokenAmount(amount) : BigInt(0); // 0 means withdraw all
+      
+      console.log("Withdrawing SUSD from lending pool...");
+      const withdrawTransaction = prepareContractCall({
+        contract: simpleLendContract,
+        method: "function withdraw(uint256)",
+        params: [withdrawAmount],
+      });
+      
+      const result = await sendTransaction({
+        transaction: withdrawTransaction,
+        account: account,
+      });
+      
+      showTransactionSuccess(result.transactionHash);
+      
+      // Reload data after delay
+      setTimeout(async () => {
+        await Promise.all([loadBalances(), loadLendingData()]);
+      }, 3000);
+      
+    } catch (error: unknown) {
+      console.error("Withdrawing failed:", error);
+      
+      let errorMessage = "Withdrawing failed. Please try again.";
+      
+      if (error instanceof Error) {
+        if (error.message.includes("User rejected")) {
+          errorMessage = "Transaction was cancelled by user.";
+        } else if (error.message.includes("insufficient funds")) {
+          errorMessage = "Insufficient ETH for gas fees.";
+        } else if (error.message.includes("gas")) {
+          errorMessage = "Gas estimation failed. Please try again later.";
+        } else if (error.message.includes("500")) {
+          errorMessage = "Network error. Please try again in a moment.";
+        }
+      }
+      
+      alert(errorMessage);
+    } finally {
+      setIsWithdrawLoading(false);
+    }
+  };
+
+  const handleClaimInterest = async () => {
+    if (!account) return;
+    
+    try {
+      console.log("Claiming lending interest...");
+      const claimTransaction = prepareContractCall({
+        contract: simpleLendContract,
+        method: "function claimInterest()",
+        params: [],
+      });
+      
+      const result = await sendTransaction({
+        transaction: claimTransaction,
+        account: account,
+      });
+      
+      showTransactionSuccess(result.transactionHash);
+      
+      // Reload data after delay
+      setTimeout(async () => {
+        await Promise.all([loadBalances(), loadLendingData()]);
+      }, 3000);
+      
+    } catch (error: unknown) {
+      console.error("Claiming interest failed:", error);
+      
+      let errorMessage = "Claiming interest failed. Please try again.";
+      
+      if (error instanceof Error) {
+        if (error.message.includes("User rejected")) {
+          errorMessage = "Transaction was cancelled by user.";
+        } else if (error.message.includes("insufficient funds")) {
+          errorMessage = "Insufficient ETH for gas fees.";
+        } else if (error.message.includes("gas")) {
+          errorMessage = "Gas estimation failed. Please try again later.";
+        } else if (error.message.includes("500")) {
+          errorMessage = "Network error. Please try again in a moment.";
+        } else if (error.message.includes("No interest")) {
+          errorMessage = "No interest available to claim.";
+        }
+      }
+      
+      alert(errorMessage);
+    }
   };
 
   const handleMint = () => {
@@ -743,8 +953,9 @@ export default function SimplePage() {
       loadBalances();
       loadSwapHistory();
       loadStakingData();
+      loadLendingData();
     }
-  }, [account, loadBalances, loadSwapHistory, loadStakingData]);
+  }, [account, loadBalances, loadSwapHistory, loadStakingData, loadLendingData]);
 
   // Calculate swap output when input changes
   useEffect(() => {
@@ -1590,17 +1801,51 @@ export default function SimplePage() {
                     Lend to Pool
                   </h3>
                   <div className="space-y-4">
+                    {/* Balance Display */}
+                    <div className="bg-gray-50 rounded-lg p-3 border border-gray-200">
+                      <div className="flex justify-between items-center">
+                        <span className="text-sm font-medium text-gray-700">Your SUSD Balance:</span>
+                        <span className="text-lg font-bold text-gray-900">{parseFloat(susdBalance).toLocaleString()} SUSD</span>
+                      </div>
+                      {parseFloat(susdBalance) === 0 && (
+                        <div className="text-xs text-amber-600 mt-1">
+                          💡 Claim free SUSD from the Claim tab first
+                        </div>
+                      )}
+                    </div>
+
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
                         Amount to Lend
                       </label>
-                      <input
-                        type="number"
-                        placeholder="Enter SUSD amount"
-                        value={lendAmount}
-                        onChange={(e) => setLendAmount(e.target.value)}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      />
+                      <div className="relative">
+                        <input
+                          type="number"
+                          placeholder="Enter SUSD amount"
+                          value={lendAmount}
+                          onChange={(e) => setLendAmount(e.target.value)}
+                          className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 ${
+                            lendAmount && parseFloat(lendAmount) > parseFloat(susdBalance)
+                              ? "border-red-300 focus:ring-red-500 focus:border-red-500"
+                              : "border-gray-300 focus:ring-blue-500 focus:border-blue-500"
+                          }`}
+                        />
+                        {parseFloat(susdBalance) > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setLendAmount(susdBalance)}
+                            className="absolute right-2 top-1/2 transform -translate-y-1/2 text-xs bg-blue-100 text-blue-600 px-2 py-1 rounded hover:bg-blue-200 transition-colors"
+                          >
+                            MAX
+                          </button>
+                        )}
+                      </div>
+                      {lendAmount && parseFloat(lendAmount) > parseFloat(susdBalance) && (
+                        <div className="text-sm text-red-600 mt-1 flex items-center">
+                          <span className="mr-1">⚠️</span>
+                          Insufficient balance. You can lend up to {parseFloat(susdBalance).toLocaleString()} SUSD
+                        </div>
+                      )}
                     </div>
                     <div className="text-sm text-gray-600">
                       Estimated annual earnings:{" "}
@@ -1610,25 +1855,51 @@ export default function SimplePage() {
                       SUSD
                     </div>
                     <div className="relative group">
-                      <motion.button
-                        whileHover={{
-                          scale: isWalletConnected && lendAmount ? 1.02 : 1,
-                        }}
-                        whileTap={{
-                          scale: isWalletConnected && lendAmount ? 0.98 : 1,
-                        }}
-                        onClick={isWalletConnected ? handleLend : undefined}
-                        disabled={!isWalletConnected || !lendAmount}
-                        className="w-full py-3 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 disabled:bg-gray-300 transition-colors cursor-pointer disabled:cursor-not-allowed">
-                        Lend to Pool
-                      </motion.button>
-                      {!isWalletConnected && (
-                        <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none">
-                          <div className="bg-gray-800 text-white text-sm px-3 py-1 rounded-lg whitespace-nowrap">
-                            Connect Wallet to transact
-                          </div>
-                        </div>
-                      )}
+                      {(() => {
+                        const isAmountValid = lendAmount && parseFloat(lendAmount) > 0 && parseFloat(lendAmount) <= parseFloat(susdBalance);
+                        const canLend = isWalletConnected && isAmountValid && !isLendLoading;
+                        
+                        return (
+                          <>
+                            <motion.button
+                              whileHover={{
+                                scale: canLend ? 1.02 : 1,
+                              }}
+                              whileTap={{
+                                scale: canLend ? 0.98 : 1,
+                              }}
+                              onClick={canLend ? handleLend : undefined}
+                              disabled={!canLend}
+                              className={`w-full py-3 font-bold rounded-lg transition-colors cursor-pointer disabled:cursor-not-allowed ${
+                                !isWalletConnected || isLendLoading
+                                  ? "bg-gray-300 text-gray-500"
+                                  : !lendAmount
+                                  ? "bg-gray-300 text-gray-500"
+                                  : lendAmount && parseFloat(lendAmount) > parseFloat(susdBalance)
+                                  ? "bg-red-500 text-white"
+                                  : "bg-blue-600 text-white hover:bg-blue-700"
+                              }`}>
+                              {isLendLoading 
+                                ? "Lending..." 
+                                : !isWalletConnected
+                                ? "Connect Wallet to Lend"
+                                : !lendAmount
+                                ? "Enter Amount to Lend"
+                                : lendAmount && parseFloat(lendAmount) > parseFloat(susdBalance)
+                                ? "Insufficient Balance"
+                                : "Lend to Pool"
+                              }
+                            </motion.button>
+                            {!isWalletConnected && (
+                              <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none">
+                                <div className="bg-gray-800 text-white text-sm px-3 py-1 rounded-lg whitespace-nowrap">
+                                  Connect Wallet to transact
+                                </div>
+                              </div>
+                            )}
+                          </>
+                        );
+                      })()}
                     </div>
                   </div>
                 </div>
@@ -1647,27 +1918,47 @@ export default function SimplePage() {
                     <div className="flex justify-between">
                       <span className="text-gray-600">Interest Earned:</span>
                       <span className="font-semibold text-blue-600">
-                        {lendingEarned} SUSD
+                        {lendingEarned.toFixed(4)} SUSD
                       </span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-600">APY:</span>
-                      <span className="font-semibold">8.0%</span>
+                      <span className="font-semibold">{lendingStats.apy}%</span>
                     </div>
-                    <div className="relative group">
-                      <button
-                        disabled={!isWalletConnected}
-                        className="w-full py-2 bg-green-600 text-white font-medium rounded-lg hover:bg-green-700 disabled:bg-gray-300 transition-colors cursor-pointer disabled:cursor-not-allowed">
-                        Withdraw All
-                      </button>
-                      {!isWalletConnected && (
-                        <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none">
-                          <div className="bg-gray-800 text-white text-sm px-3 py-1 rounded-lg whitespace-nowrap">
-                            Connect Wallet to transact
+                    {lendingEarned > 0 && (
+                      <div className="relative group">
+                        <button
+                          onClick={isWalletConnected ? handleClaimInterest : undefined}
+                          disabled={!isWalletConnected || lendingEarned === 0}
+                          className="w-full py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 disabled:bg-gray-300 transition-colors cursor-pointer disabled:cursor-not-allowed">
+                          Claim {lendingEarned.toFixed(4)} SUSD Interest
+                        </button>
+                        {!isWalletConnected && (
+                          <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none">
+                            <div className="bg-gray-800 text-white text-sm px-3 py-1 rounded-lg whitespace-nowrap">
+                              Connect Wallet to transact
+                            </div>
                           </div>
-                        </div>
-                      )}
-                    </div>
+                        )}
+                      </div>
+                    )}
+                    {lentBalance > 0 && (
+                      <div className="relative group">
+                        <button
+                          onClick={isWalletConnected && !isWithdrawLoading ? () => handleWithdraw() : undefined}
+                          disabled={!isWalletConnected || lentBalance === 0 || isWithdrawLoading}
+                          className="w-full py-2 bg-green-600 text-white font-medium rounded-lg hover:bg-green-700 disabled:bg-gray-300 transition-colors cursor-pointer disabled:cursor-not-allowed">
+                          {isWithdrawLoading ? "Withdrawing..." : `Withdraw All ${lentBalance.toFixed(2)} SUSD`}
+                        </button>
+                        {!isWalletConnected && (
+                          <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none">
+                            <div className="bg-gray-800 text-white text-sm px-3 py-1 rounded-lg whitespace-nowrap">
+                              Connect Wallet to transact
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -1689,17 +1980,29 @@ export default function SimplePage() {
               <h3 className="text-lg font-semibold text-gray-900 mb-4">
                 Pool Statistics
               </h3>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div className="text-center">
-                  <div className="text-2xl font-bold text-blue-600">$2.5M</div>
-                  <div className="text-sm text-gray-600">Total Pool Size</div>
+                  <div className="text-2xl font-bold text-blue-600">
+                    {lendingStats.totalLent.toLocaleString()}
+                  </div>
+                  <div className="text-sm text-gray-600">Total Lent SUSD</div>
                 </div>
                 <div className="text-center">
-                  <div className="text-2xl font-bold text-green-600">8.0%</div>
+                  <div className="text-2xl font-bold text-gray-900">
+                    {lendingStats.totalLenders}
+                  </div>
+                  <div className="text-sm text-gray-600">Active Lenders</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-2xl font-bold text-green-600">
+                    {lendingStats.apy}%
+                  </div>
                   <div className="text-sm text-gray-600">Current APY</div>
                 </div>
                 <div className="text-center">
-                  <div className="text-2xl font-bold text-purple-600">85%</div>
+                  <div className="text-2xl font-bold text-purple-600">
+                    {lendingStats.utilizationRate}%
+                  </div>
                   <div className="text-sm text-gray-600">Utilization Rate</div>
                 </div>
               </div>
