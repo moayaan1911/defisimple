@@ -422,7 +422,7 @@ contract SimpleLendTest is Test {
         assertEq(deposited, amount);
     }
 
-    function testFuzzInterestCalculation(uint256 amount, uint256 duration) public {
+    function testFuzzInterestCalculation(uint256 amount, uint256 duration) public view{
         amount = bound(amount, 1e18, 1000000 * 1e18); // 1 to 1M SUSD
         duration = bound(duration, 1 days, 365 days); // 1 day to 1 year
 
