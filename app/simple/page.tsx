@@ -10,11 +10,10 @@ import {
   FiDollarSign,
   FiImage,
   FiLink,
-  FiMessageCircle,
 } from "react-icons/fi";
 import Link from "next/link";
 import ConnectWallet from "@/components/ConnectWallet";
-import AIChat from "@/components/AIChat";
+import AiBot from "@/components/AiBot";
 import { useActiveAccount } from "thirdweb/react";
 import { readContract, sendTransaction, prepareContractCall } from "thirdweb";
 import { simpleUSDContract, simpleSwapContract, mockETHContract, simpleStakeContract, simpleLendContract, formatTokenAmount, parseTokenAmount, CONTRACT_ADDRESSES } from "@/lib/contracts";
@@ -57,7 +56,6 @@ export default function SimplePage() {
   const [claimed, setClaimed] = useState(false);
   const [showTransactionModal, setShowTransactionModal] = useState(false);
   const [transactionHash, setTransactionHash] = useState("");
-  const [isAIChatOpen, setIsAIChatOpen] = useState(false);
   const [timeLeft, setTimeLeft] = useState({
     hours: 0,
     minutes: 0,
@@ -2435,24 +2433,8 @@ export default function SimplePage() {
         </div>
       )}
 
-      {/* AI Chat Floating Button */}
-      <motion.button
-        initial={{ scale: 0 }}
-        animate={{ scale: 1 }}
-        whileHover={{ scale: 1.1 }}
-        whileTap={{ scale: 0.95 }}
-        onClick={() => setIsAIChatOpen(true)}
-        className="fixed bottom-6 right-6 w-20 h-20 bg-gradient-to-r from-blue-500 to-purple-600 text-white rounded-full shadow-lg hover:shadow-xl transition-all duration-300 flex items-center justify-center z-40 border-2 border-white cursor-pointer"
-        title="Ask Thirdweb AI Assistant"
-      >
-        <FiMessageCircle size={32} />
-      </motion.button>
-
-      {/* AI Chat Modal */}
-      <AIChat
-        isOpen={isAIChatOpen}
-        onClose={() => setIsAIChatOpen(false)}
-      />
+      {/* AI Bot Component */}
+      <AiBot />
     </div>
   );
 }
