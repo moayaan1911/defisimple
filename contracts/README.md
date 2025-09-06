@@ -21,6 +21,7 @@ MockETH: [`0xE4a44C989Ca39AF437C5dE4ADbcF02BcAbdE0595`](https://sepolia.ethersca
 
 SimpleSwap: [`0x0704aE35C1747D9d9dca59B143a362A6A95B8371`](https://sepolia.etherscan.io/address/0x0704ae35c1747d9d9dca59b143a362a6a95b8371)
 
+SimpleNFT: [`0xfffb02cBBea60824476e67E6CAA39E9dF15C49d2`](https://sepolia.etherscan.io/address/0xfffb02cbbea60824476e67e6caa39e9df15c49d2)
 
 SimpleStake: [`0x9F68f3E960033F61141E0C3ae199683DFe4a5e06`](https://sepolia.etherscan.io/address/0x9f68f3e960033f61141e0c3ae199683dfe4a5e06)
 

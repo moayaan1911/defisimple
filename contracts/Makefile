@@ -12,7 +12,9 @@ update:; forge update
 
 build:; forge build
 
-test-all :; forge test --match-path "test/**/*.sol" -vv 
+test-all :; forge test --match-path "test/**/*.sol" -vv
+
+test-nft :; forge test --match-path "test/SimpleNFT.t.sol" -vv 
 
 
 snapshot :; forge snapshot

@@ -48,6 +48,9 @@ export default function ConnectWallet() {
           },
         ],
       }}
+      supportedNFTs={{
+        [sepolia.id]: [CONTRACT_ADDRESSES.SIMPLE_NFT],
+      }}
       theme={isConnected ? "light" : "dark"}
       wallets={wallets}
     />

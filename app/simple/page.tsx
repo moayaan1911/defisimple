@@ -16,7 +16,9 @@ import ConnectWallet from "@/components/ConnectWallet";
 import AiBot from "@/components/AiBot";
 import { useActiveAccount } from "thirdweb/react";
 import { readContract, sendTransaction, prepareContractCall } from "thirdweb";
-import { simpleUSDContract, simpleSwapContract, mockETHContract, simpleStakeContract, simpleLendContract, formatTokenAmount, parseTokenAmount, CONTRACT_ADDRESSES } from "@/lib/contracts";
+import { upload, download } from "thirdweb/storage";
+import { client } from "@/lib/client";
+import { simpleUSDContract, simpleSwapContract, mockETHContract, simpleStakeContract, simpleLendContract, simpleNFTContract, formatTokenAmount, parseTokenAmount, CONTRACT_ADDRESSES } from "@/lib/contracts";
 
 interface UserAchievements {
   firstClaim: boolean;
@@ -107,10 +109,32 @@ export default function SimplePage() {
     utilizationRate: 0
   });
 
-  // Mint state
+  // NFT Mint state
   const [nftName, setNftName] = useState("");
   const [nftDescription, setNftDescription] = useState("");
-  const [mintedCount] = useState(3);
+  const [selectedImage, setSelectedImage] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string>("");
+  const [isMintLoading, setIsMintLoading] = useState(false);
+  const [isImageUploading, setIsImageUploading] = useState(false);
+  const [mintStats, setMintStats] = useState({
+    userMintCount: 0,
+    lastMintTime: 0,
+    nextMintTime: 0,
+    canMint: true,
+    timeLeft: 0
+  });
+  const [collectionStats, setCollectionStats] = useState({
+    totalSupply: 0,
+    maxSupply: 10000,
+    mintPrice: 10,
+    mintingActive: true
+  });
+  const [userNFTs, setUserNFTs] = useState<Array<{
+    tokenId: number;
+    name: string;
+    description: string;
+    image: string;
+  }>>([]);
 
   // Bridge state
   const [bridgeAmount, setBridgeAmount] = useState("");
@@ -284,6 +308,189 @@ export default function SimplePage() {
       console.error("Error loading balances:", error);
     }
   }, [account]);
+
+  // IPFS helper function - only ipfs.io gateway
+  const resolveIPFS = useCallback((ipfsUrl: string): string => {
+    const hash = ipfsUrl.replace('ipfs://', '');
+    return `https://ipfs.io/ipfs/${hash}`;
+  }, []);
+
+  // Fetch from IPFS using Thirdweb V5 download API with ipfs.io fallback
+  const fetchFromIPFS = useCallback(async (ipfsUrl: string): Promise<unknown> => {
+    try {
+      console.log("🎨 Downloading from IPFS using Thirdweb:", ipfsUrl);
+      
+      // First try with official Thirdweb download API
+      const response = await download({
+        client,
+        uri: ipfsUrl,
+      });
+      
+      console.log("✅ Thirdweb download response:", response);
+      
+      // Convert response to JSON
+      const data = await response.json();
+      console.log("✅ Success with Thirdweb download API:", data);
+      return data;
+      
+    } catch (thirdwebError) {
+      console.log("❌ Thirdweb download failed:", thirdwebError);
+      
+      // Fallback to ipfs.io gateway only
+      const gateway = resolveIPFS(ipfsUrl);
+      
+      try {
+        console.log("🎨 Trying ipfs.io gateway:", gateway);
+        const response = await fetch(gateway, { 
+          method: 'GET',
+          headers: { 'Accept': 'application/json' }
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          console.log("✅ Success with ipfs.io gateway:", gateway);
+          return data;
+        } else {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+      } catch (error) {
+        console.log("❌ Failed ipfs.io gateway:", gateway, error);
+        throw new Error(`Failed to fetch from both Thirdweb and ipfs.io for: ${ipfsUrl}`);
+      }
+    }
+  }, [resolveIPFS]);
+
+  // Load NFT data
+  const loadNFTData = useCallback(async () => {
+    if (!account) return;
+    
+    console.log("🎨 Loading NFT data for account:", account.address);
+    
+    try {
+      // Load collection stats
+      const [supply, maxSupply, mintPrice, active] = await readContract({
+        contract: simpleNFTContract,
+        method: "function getCollectionStats() view returns (uint256, uint256, uint256, bool)",
+        params: [],
+      }) as [bigint, bigint, bigint, boolean];
+
+      setCollectionStats({
+        totalSupply: Number(supply),
+        maxSupply: Number(maxSupply),
+        mintPrice: Number(formatTokenAmount(mintPrice)),
+        mintingActive: active
+      });
+
+      // Load user mint stats
+      const [minted, lastMint, nextMint] = await readContract({
+        contract: simpleNFTContract,
+        method: "function getMintStats(address) view returns (uint256, uint256, uint256)",
+        params: [account.address],
+      }) as [bigint, bigint, bigint];
+
+      // Check if user can mint
+      const [canMintNow, timeLeft] = await readContract({
+        contract: simpleNFTContract,
+        method: "function canMint(address) view returns (bool, uint256)",
+        params: [account.address],
+      }) as [boolean, bigint];
+
+      setMintStats({
+        userMintCount: Number(minted),
+        lastMintTime: Number(lastMint),
+        nextMintTime: Number(nextMint),
+        canMint: canMintNow,
+        timeLeft: Number(timeLeft)
+      });
+
+      // Load user's real NFTs
+      const balance = await readContract({
+        contract: simpleNFTContract,
+        method: "function balanceOf(address) view returns (uint256)",
+        params: [account.address],
+      }) as bigint;
+
+      console.log("🎨 User NFT balance:", Number(balance));
+
+      const nfts = [];
+      const userBalance = Number(balance);
+      
+      if (userBalance > 0) {
+        // Get NFT events to find user's token IDs (simplified approach)
+        // Alternative: implement tokenOfOwnerByIndex if available
+        
+        // For now, we'll check token ownership by trying sequential token IDs
+        // In production, you'd use events or enumerable extension
+        let foundTokens = 0;
+        let tokenId = 1;
+        const maxCheck = 100; // Limit search to prevent infinite loop
+        
+        while (foundTokens < userBalance && tokenId <= maxCheck) {
+          try {
+            // Check if user owns this token
+            const owner = await readContract({
+              contract: simpleNFTContract,
+              method: "function ownerOf(uint256) view returns (address)",
+              params: [BigInt(tokenId)],
+            }) as string;
+            
+            if (owner.toLowerCase() === account.address.toLowerCase()) {
+              console.log("🎨 Found user's NFT! Token ID:", tokenId);
+              
+              // User owns this token, get its metadata
+              const tokenURI = await readContract({
+                contract: simpleNFTContract,
+                method: "function tokenURI(uint256) view returns (string)",
+                params: [BigInt(tokenId)],
+              }) as string;
+              
+              console.log("🎨 Token URI:", tokenURI);
+              
+              // Fetch metadata from IPFS with fallback gateways
+              try {
+                console.log("🎨 Fetching metadata from:", tokenURI);
+                
+                const metadata = await fetchFromIPFS(tokenURI) as { name?: string; description?: string; image?: string } | null;
+                console.log("🎨 Metadata:", metadata);
+                
+                // Resolve image URL with ipfs.io gateway
+                const imageUrl = metadata?.image ? resolveIPFS(metadata.image) : '';
+                
+                console.log("🎨 Image URL:", imageUrl);
+                
+                nfts.push({
+                  tokenId,
+                  name: metadata?.name || `DeFi Hero #${tokenId}`,
+                  description: metadata?.description || "A unique DeFi Learning Hero NFT",
+                  image: imageUrl
+                });
+                foundTokens++;
+              } catch (metadataError) {
+                console.error(`Failed to fetch metadata for token ${tokenId}:`, metadataError);
+                // Add with fallback data
+                nfts.push({
+                  tokenId,
+                  name: `DeFi Hero #${tokenId}`,
+                  description: "A unique DeFi Learning Hero NFT",
+                  image: ''
+                });
+                foundTokens++;
+              }
+            }
+          } catch (ownerError) {
+            // Token doesn't exist or other error, continue to next
+          }
+          tokenId++;
+        }
+      }
+      
+      console.log("🎨 Final NFTs array:", nfts);
+      setUserNFTs(nfts);
+
+    } catch (error) {
+      console.error("❌ Failed to load NFT data:", error);
+    }
+  }, [account, fetchFromIPFS, resolveIPFS]);
 
   const loadSwapHistory = useCallback(async () => {
     try {
@@ -925,12 +1132,238 @@ export default function SimplePage() {
     }
   };
 
-  const handleMint = () => {
-    if (!nftName || !nftDescription) return;
-    const dummyHash = `0x${Math.random().toString(16).substring(2, 66)}`;
-    showTransactionSuccess(dummyHash);
-    setNftName("");
-    setNftDescription("");
+  // Image upload handler
+  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Validate file type
+    if (!file.type.startsWith("image/")) {
+      alert("Please select a valid image file");
+      return;
+    }
+
+    // Validate file size (max 10MB)
+    if (file.size > 10 * 1024 * 1024) {
+      alert("Image must be smaller than 10MB");
+      return;
+    }
+
+    setSelectedImage(file);
+    
+    // Create preview
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      setImagePreview(e.target?.result as string);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // Upload image to IPFS
+  const uploadImageToIPFS = async (file: File): Promise<string> => {
+    try {
+      setIsImageUploading(true);
+      console.log("📤 Uploading image file:", file.name, "Size:", file.size, "Type:", file.type);
+      
+      // Use Thirdweb V5 upload API correctly
+      const uris = await upload({
+        client,
+        files: [file],
+      });
+      
+      console.log("🔍 Upload response:", uris);
+      console.log("🔍 Upload response type:", typeof uris);
+      console.log("🔍 Upload response length:", Array.isArray(uris) ? uris.length : 'Not array');
+      
+      // Check if we get a valid IPFS URI
+      const imageUri = Array.isArray(uris) ? uris[0] : uris;
+      console.log("✅ Image uploaded to IPFS:", imageUri);
+      
+      // Validate the URI format
+      if (!imageUri || (!imageUri.startsWith('ipfs://') && !imageUri.startsWith('https://'))) {
+        throw new Error(`Invalid IPFS URI returned: ${imageUri}`);
+      }
+      
+      console.log("🌐 Testing image URL:", imageUri.startsWith('ipfs://') ? imageUri.replace('ipfs://', 'https://thirdweb.com/ipfs/') : imageUri);
+      
+      return imageUri;
+    } catch (error) {
+      console.error("❌ Image upload failed:", error);
+      throw new Error(`Failed to upload image to IPFS: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setIsImageUploading(false);
+    }
+  };
+
+  // Create and upload JSON metadata to IPFS
+  const uploadMetadataToIPFS = async (imageUri: string): Promise<string> => {
+    try {
+      const metadata = {
+        name: nftName,
+        description: nftDescription,
+        image: imageUri,
+        attributes: [
+          {
+            trait_type: "Collection",
+            value: "DeFi Learning Heroes"
+          },
+          {
+            trait_type: "Created At",
+            value: new Date().toISOString()
+          }
+        ]
+      };
+
+      console.log("📋 Creating metadata JSON:", metadata);
+
+      const metadataFile = new File(
+        [JSON.stringify(metadata, null, 2)],
+        "metadata.json",
+        { type: "application/json" }
+      );
+
+      console.log("📤 Uploading metadata file size:", metadataFile.size);
+
+      const uris = await upload({
+        client,
+        files: [metadataFile],
+      });
+
+      console.log("🔍 Metadata upload response:", uris);
+      console.log("🔍 Metadata response type:", typeof uris);
+      console.log("🔍 Metadata response length:", Array.isArray(uris) ? uris.length : 'Not array');
+
+      const metadataUri = Array.isArray(uris) ? uris[0] : uris;
+      console.log("✅ Metadata uploaded to IPFS:", metadataUri);
+
+      // Validate the metadata URI format
+      if (!metadataUri || (!metadataUri.startsWith('ipfs://') && !metadataUri.startsWith('https://'))) {
+        throw new Error(`Invalid metadata IPFS URI returned: ${metadataUri}`);
+      }
+
+      console.log("🌐 Testing metadata URL:", metadataUri.startsWith('ipfs://') ? metadataUri.replace('ipfs://', 'https://thirdweb.com/ipfs/') : metadataUri);
+
+      return metadataUri;
+    } catch (error) {
+      console.error("❌ Metadata upload failed:", error);
+      throw new Error("Failed to upload metadata to IPFS");
+    }
+  };
+
+  // Main mint function
+  const handleMint = async () => {
+    if (!account || !selectedImage || !nftName || !nftDescription) return;
+    
+    try {
+      setIsMintLoading(true);
+
+      // Check if user can mint
+      if (!mintStats.canMint) {
+        alert("You are still in cooldown period. Please wait before minting again.");
+        return;
+      }
+
+      // Check SUSD balance and allowance
+      const balance = await readContract({
+        contract: simpleUSDContract,
+        method: "function balanceOf(address) view returns (uint256)",
+        params: [account.address],
+      }) as bigint;
+
+      const mintPriceInWei = parseTokenAmount("10");
+      if (balance < mintPriceInWei) {
+        alert("Insufficient SUSD balance. You need 10 SUSD to mint an NFT.");
+        return;
+      }
+
+      // Check allowance
+      const allowance = await readContract({
+        contract: simpleUSDContract,
+        method: "function allowance(address,address) view returns (uint256)",
+        params: [account.address, CONTRACT_ADDRESSES.SIMPLE_NFT],
+      }) as bigint;
+
+      // Approve if necessary
+      if (allowance < mintPriceInWei) {
+        const approveTx = prepareContractCall({
+          contract: simpleUSDContract,
+          method: "function approve(address,uint256) returns (bool)",
+          params: [CONTRACT_ADDRESSES.SIMPLE_NFT, mintPriceInWei],
+        });
+
+        await sendTransaction({
+          transaction: approveTx,
+          account,
+        });
+
+        // Wait for approval confirmation
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      }
+
+      // 1. Upload image to IPFS
+      console.log("Uploading image to IPFS...");
+      const imageUri = await uploadImageToIPFS(selectedImage);
+      console.log("Image uploaded:", imageUri);
+
+      // 2. Create and upload metadata to IPFS
+      console.log("Creating metadata and uploading to IPFS...");
+      const metadataUri = await uploadMetadataToIPFS(imageUri);
+      console.log("Metadata uploaded:", metadataUri);
+
+      // 3. Mint NFT with metadata URI
+      console.log("Minting NFT...");
+      const mintTx = prepareContractCall({
+        contract: simpleNFTContract,
+        method: "function mintWithURI(string)",
+        params: [metadataUri],
+      });
+
+      const result = await sendTransaction({
+        transaction: mintTx,
+        account,
+      });
+
+      console.log("NFT minted successfully:", result.transactionHash);
+      
+      // Show success modal
+      showTransactionSuccess(result.transactionHash);
+
+      // Reset form
+      setNftName("");
+      setNftDescription("");
+      setSelectedImage(null);
+      setImagePreview("");
+
+      // Reload NFT data
+      setTimeout(async () => {
+        await Promise.all([loadNFTData(), loadBalances()]);
+      }, 3000);
+
+    } catch (error: unknown) {
+      console.error("NFT minting failed:", error);
+      
+      let errorMessage = "NFT minting failed. Please try again.";
+      
+      if (error instanceof Error) {
+        if (error.message.includes("User rejected")) {
+          errorMessage = "Transaction was cancelled by user.";
+        } else if (error.message.includes("insufficient funds")) {
+          errorMessage = "Insufficient ETH for gas fees.";
+        } else if (error.message.includes("SimpleNFT__MintCooldownActive")) {
+          errorMessage = "You are still in cooldown period. Please wait before minting again.";
+        } else if (error.message.includes("SimpleNFT__InsufficientSUSD")) {
+          errorMessage = "Insufficient SUSD balance or approval needed.";
+        } else if (error.message.includes("SimpleNFT__MintingNotActive")) {
+          errorMessage = "Minting is currently disabled.";
+        } else if (error.message.includes("SimpleNFT__MaxSupplyReached")) {
+          errorMessage = "Maximum NFT supply has been reached.";
+        }
+      }
+      
+      alert(errorMessage);
+    } finally {
+      setIsMintLoading(false);
+    }
   };
 
   const handleBridge = () => {
@@ -938,6 +1371,35 @@ export default function SimplePage() {
     const dummyHash = `0x${Math.random().toString(16).substring(2, 66)}`;
     showTransactionSuccess(dummyHash);
     setBridgeAmount("");
+  };
+
+
+  // Simple NFT Image component with ipfs.io gateway only
+  const NFTImage: React.FC<{ src: string; alt: string; tokenId: number }> = ({ src, alt, tokenId }) => {
+    const [failed, setFailed] = useState(false);
+
+    const handleError = () => {
+      console.log(`❌ Failed to load image for token ${tokenId}:`, src);
+      setFailed(true);
+    };
+
+    if (failed) {
+      return (
+        <div className="w-full h-full flex items-center justify-center bg-gray-100 rounded-lg">
+          <FiImage size={24} className="text-purple-600" />
+        </div>
+      );
+    }
+
+    return (
+      <img 
+        src={src} 
+        alt={alt}
+        className="w-full h-full object-cover rounded-lg"
+        onError={handleError}
+        loading="lazy"
+      />
+    );
   };
 
   const openEducationModal = (content: string) => {
@@ -952,8 +1414,9 @@ export default function SimplePage() {
       loadSwapHistory();
       loadStakingData();
       loadLendingData();
+      loadNFTData();
     }
-  }, [account, loadBalances, loadSwapHistory, loadStakingData, loadLendingData]);
+  }, [account, loadBalances, loadSwapHistory, loadStakingData, loadLendingData, loadNFTData]);
 
   // Calculate swap output when input changes
   useEffect(() => {
@@ -2015,27 +2478,104 @@ export default function SimplePage() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5 }}
             className="space-y-8">
+            
+            {/* Collection Stats Header */}
+            <div className="bg-gradient-to-br from-pink-50 to-rose-50 border border-pink-200 rounded-2xl p-6">
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div className="text-center">
+                  <div className="text-2xl font-bold text-pink-600">{collectionStats.totalSupply}</div>
+                  <div className="text-sm text-gray-600">Total Minted</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-2xl font-bold text-pink-600">{collectionStats.maxSupply}</div>
+                  <div className="text-sm text-gray-600">Max Supply</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-2xl font-bold text-pink-600">{collectionStats.mintPrice} SUSD</div>
+                  <div className="text-sm text-gray-600">Mint Price</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-2xl font-bold text-pink-600">{mintStats.userMintCount}</div>
+                  <div className="text-sm text-gray-600">Your NFTs</div>
+                </div>
+              </div>
+            </div>
+
+            {/* Main Mint Section */}
             <div className="bg-gradient-to-br from-pink-50 to-rose-50 border border-pink-200 rounded-2xl p-8">
               <div className="text-center mb-8">
                 <div className="inline-flex items-center justify-center w-20 h-20 bg-pink-600 rounded-full mb-6">
-                  <FiImage
-                    size={32}
-                    className="text-white"
-                  />
+                  <FiImage size={32} className="text-white" />
                 </div>
-                <h1 className="text-4xl font-bold text-gray-900 mb-4">
-                  Mint NFT
-                </h1>
-                <p className="text-xl text-gray-600 mb-8 max-w-2xl mx-auto">
+                <h1 className="text-4xl font-bold text-gray-900 mb-4">Mint NFT</h1>
+                <p className="text-xl text-gray-600 mb-4 max-w-2xl mx-auto">
                   Create your own NFT from the DeFi Learning Heroes collection
                 </p>
+                {!mintStats.canMint && (
+                  <div className="bg-yellow-100 border border-yellow-300 rounded-lg p-3 max-w-md mx-auto">
+                    <p className="text-yellow-800 text-sm">
+                      ⏳ Cooldown active. Next mint available in {Math.ceil(mintStats.timeLeft / 60)} minutes
+                    </p>
+                  </div>
+                )}
               </div>
 
-              <div className="max-w-md mx-auto bg-white rounded-2xl p-6 shadow-lg">
-                <div className="space-y-4">
+              <div className="max-w-lg mx-auto bg-white rounded-2xl p-6 shadow-lg">
+                <div className="space-y-6">
+                  
+                  {/* Image Upload Section */}
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
-                      NFT Name
+                      Upload Image
+                    </label>
+                    <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-pink-400 transition-colors">
+                      {imagePreview ? (
+                        <div className="space-y-4">
+                          <img 
+                            src={imagePreview} 
+                            alt="NFT Preview" 
+                            className="max-w-full h-48 object-contain mx-auto rounded-lg"
+                          />
+                          <button
+                            onClick={() => {
+                              setSelectedImage(null);
+                              setImagePreview("");
+                            }}
+                            className="text-red-500 hover:text-red-700 text-sm"
+                          >
+                            Remove Image
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          <FiImage size={32} className="mx-auto text-gray-400" />
+                          <div className="text-gray-600">
+                            <label className="cursor-pointer text-pink-600 hover:text-pink-700">
+                              Choose an image
+                              <input
+                                type="file"
+                                accept="image/*"
+                                onChange={handleImageSelect}
+                                className="hidden"
+                              />
+                            </label>
+                            {" "}or drag and drop
+                          </div>
+                          <div className="text-xs text-gray-500">PNG, JPG, GIF up to 10MB</div>
+                        </div>
+                      )}
+                    </div>
+                    {isImageUploading && (
+                      <div className="text-center mt-2 text-sm text-pink-600">
+                        Uploading image to IPFS...
+                      </div>
+                    )}
+                  </div>
+
+                  {/* NFT Details */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      NFT Name *
                     </label>
                     <input
                       type="text"
@@ -2048,7 +2588,7 @@ export default function SimplePage() {
 
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Description
+                      Description *
                     </label>
                     <textarea
                       placeholder="Describe your NFT"
@@ -2059,35 +2599,53 @@ export default function SimplePage() {
                     />
                   </div>
 
-                  <div className="text-sm text-gray-600 text-center">
-                    Gasless minting enabled • Free for testnet
+                  {/* Mint Info */}
+                  <div className="bg-gray-50 rounded-lg p-4">
+                    <div className="flex justify-between items-center mb-2">
+                      <span className="text-sm text-gray-600">Mint Price:</span>
+                      <span className="font-semibold">{collectionStats.mintPrice} SUSD</span>
+                    </div>
+                    <div className="flex justify-between items-center mb-2">
+                      <span className="text-sm text-gray-600">Your Balance:</span>
+                      <span className="font-semibold">{susdBalance} SUSD</span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm text-gray-600">Storage:</span>
+                      <span className="font-semibold text-pink-600">IPFS (Decentralized)</span>
+                    </div>
                   </div>
 
+                  {/* Mint Button */}
                   <div className="relative group">
                     <motion.button
-                      whileHover={{
-                        scale:
-                          isWalletConnected && nftName && nftDescription
-                            ? 1.02
-                            : 1,
-                      }}
-                      whileTap={{
-                        scale:
-                          isWalletConnected && nftName && nftDescription
-                            ? 0.98
-                            : 1,
-                      }}
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
                       onClick={isWalletConnected ? handleMint : undefined}
                       disabled={
-                        !isWalletConnected || !nftName || !nftDescription
+                        !isWalletConnected || 
+                        !selectedImage || 
+                        !nftName || 
+                        !nftDescription || 
+                        !mintStats.canMint ||
+                        isMintLoading
                       }
-                      className="w-full py-3 bg-pink-600 text-white font-bold rounded-lg hover:bg-pink-700 disabled:bg-gray-300 transition-colors cursor-pointer disabled:cursor-not-allowed">
-                      Mint NFT
+                      className="w-full py-4 bg-pink-600 text-white font-bold rounded-lg hover:bg-pink-700 disabled:bg-gray-300 transition-colors cursor-pointer disabled:cursor-not-allowed flex items-center justify-center space-x-2">
+                      {isMintLoading ? (
+                        <>
+                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                          <span>Minting...</span>
+                        </>
+                      ) : (
+                        <>
+                          <FiImage size={16} />
+                          <span>Mint NFT</span>
+                        </>
+                      )}
                     </motion.button>
                     {!isWalletConnected && (
                       <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none">
                         <div className="bg-gray-800 text-white text-sm px-3 py-1 rounded-lg whitespace-nowrap">
-                          Connect Wallet to transact
+                          Connect Wallet to mint
                         </div>
                       </div>
                     )}
@@ -2099,45 +2657,55 @@ export default function SimplePage() {
                 <button
                   onClick={() => openEducationModal("mint")}
                   className="inline-flex items-center px-6 py-2 bg-blue-100 text-blue-600 rounded-lg hover:bg-blue-200 transition-colors cursor-pointer">
-                  <FiInfo
-                    className="mr-2"
-                    size={16}
-                  />
+                  <FiInfo className="mr-2" size={16} />
                   What are NFTs?
                 </button>
               </div>
             </div>
 
+            {/* Your Collection Section */}
             <div className="bg-white border border-gray-200 rounded-2xl p-6">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">
-                Your Collection
-              </h3>
-              <div className="text-center py-8">
-                <div className="text-4xl font-bold text-pink-600 mb-2">
-                  {mintedCount}
-                </div>
-                <div className="text-gray-600">NFTs Minted</div>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-gray-900">
+                  Your Collection
+                </h3>
+                <button
+                  onClick={loadNFTData}
+                  className="px-3 py-1 bg-pink-100 text-pink-600 rounded-lg hover:bg-pink-200 transition-colors text-sm"
+                >
+                  🔄 Refresh
+                </button>
               </div>
-              <div className="grid grid-cols-3 gap-4">
-                <div className="aspect-square bg-gradient-to-br from-pink-200 to-purple-200 rounded-lg flex items-center justify-center">
-                  <FiImage
-                    size={24}
-                    className="text-purple-600"
-                  />
+              {userNFTs.length > 0 ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {userNFTs.map((nft) => (
+                    <div key={nft.tokenId} className="bg-gray-50 rounded-lg p-4">
+                      <div className="aspect-square bg-gradient-to-br from-pink-200 to-purple-200 rounded-lg overflow-hidden mb-3">
+                        {nft.image ? (
+                          <NFTImage 
+                            src={nft.image} 
+                            alt={nft.name}
+                            tokenId={nft.tokenId}
+                          />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center">
+                            <FiImage size={24} className="text-purple-600" />
+                          </div>
+                        )}
+                      </div>
+                      <h4 className="font-semibold text-gray-900 mb-1">{nft.name}</h4>
+                      <p className="text-sm text-gray-600 mb-2 line-clamp-2">{nft.description}</p>
+                      <div className="text-xs text-pink-600">Token #{nft.tokenId}</div>
+                    </div>
+                  ))}
                 </div>
-                <div className="aspect-square bg-gradient-to-br from-blue-200 to-cyan-200 rounded-lg flex items-center justify-center">
-                  <FiImage
-                    size={24}
-                    className="text-cyan-600"
-                  />
+              ) : (
+                <div className="text-center py-12">
+                  <FiImage size={48} className="mx-auto text-gray-300 mb-4" />
+                  <p className="text-gray-500 mb-2">No NFTs minted yet</p>
+                  <p className="text-sm text-gray-400">Your minted NFTs will appear here</p>
                 </div>
-                <div className="aspect-square bg-gradient-to-br from-green-200 to-teal-200 rounded-lg flex items-center justify-center">
-                  <FiImage
-                    size={24}
-                    className="text-teal-600"
-                  />
-                </div>
-              </div>
+              )}
             </div>
           </motion.div>
         )}
