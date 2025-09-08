@@ -1,7 +1,7 @@
 "use client";
 import React, { useState, useEffect } from "react";
 import { motion } from "motion/react";
-import { FiTrendingUp, FiShield, FiTarget, FiLayers, FiDollarSign, FiInfo, FiExternalLink } from "react-icons/fi";
+import { FiTrendingUp, FiShield, FiTarget, FiLayers, FiLink, FiInfo, FiExternalLink } from "react-icons/fi";
 import Link from "next/link";
 
 // Types for API responses
@@ -35,12 +35,12 @@ interface SyntheticAsset {
   cRatio: string;
 }
 
-interface LendingProtocol {
+interface BridgeProtocol {
   protocol: string;
-  chain: string;
-  asset: string;
-  apy: string;
+  chains: string;
+  fees: string;
   tvl: string;
+  speed: string;
 }
 
 export default function ComplexPage() {
@@ -53,7 +53,7 @@ export default function ComplexPage() {
   const [insuranceData, setInsuranceData] = useState<InsuranceData[]>([]);
   const [predictionMarkets, setPredictionMarkets] = useState<PredictionMarket[]>([]);
   const [syntheticAssets, setSyntheticAssets] = useState<SyntheticAsset[]>([]);
-  const [lendingProtocols, setLendingProtocols] = useState<LendingProtocol[]>([]);
+  const [bridgeProtocols, setBridgeProtocols] = useState<BridgeProtocol[]>([]);
   
   // Loading states
   const [loading, setLoading] = useState(true);
@@ -63,7 +63,7 @@ export default function ComplexPage() {
     { id: "insurance", name: "Insurance", icon: FiShield, active: true },
     { id: "prediction", name: "Prediction Markets", icon: FiTarget, active: true },
     { id: "synthetic", name: "Synthetic Assets", icon: FiLayers, active: true },
-    { id: "lending", name: "Advanced Lending", icon: FiDollarSign, active: true },
+    { id: "bridge", name: "Cross-Chain Bridge", icon: FiLink, active: true },
   ];
 
   // Fetch real DeFiLlama yield data
@@ -170,56 +170,56 @@ export default function ComplexPage() {
   const generateSyntheticData = () => {
     const data: SyntheticAsset[] = [
       {
-        symbol: "sUSD",
-        name: "Synthetic USD",
-        price: "$0.998",
-        marketCap: "$156.8M",
-        cRatio: "162.5%"
+        symbol: "sTSLA",
+        name: "Synthetic Tesla Stock",
+        price: "$248.42",
+        marketCap: "$45.2M",
+        cRatio: "158.3%"
       },
       {
-        symbol: "sBTC",
-        name: "Synthetic Bitcoin", 
-        price: "$97,845",
-        marketCap: "$234.6M",
-        cRatio: "175.2%"
+        symbol: "sAAPL",
+        name: "Synthetic Apple Stock", 
+        price: "$229.87",
+        marketCap: "$67.8M",
+        cRatio: "172.1%"
       },
       {
-        symbol: "sETH",
-        name: "Synthetic Ethereum",
-        price: "$3,893",
-        marketCap: "$189.2M",
-        cRatio: "168.9%"
+        symbol: "sGOLD",
+        name: "Synthetic Gold",
+        price: "$2,658.30",
+        marketCap: "$89.4M",
+        cRatio: "165.7%"
       }
     ];
     setSyntheticAssets(data);
   };
 
-  // Generate lending data (simplified to 3 entries)
-  const generateLendingData = () => {
-    const data: LendingProtocol[] = [
+  // Generate bridge data (simplified to 3 entries)
+  const generateBridgeData = () => {
+    const data: BridgeProtocol[] = [
       {
-        protocol: "Aave V3",
-        chain: "Ethereum",
-        asset: "USDC",
-        apy: "4.23%",
-        tvl: "$1.23B"
+        protocol: "LayerZero",
+        chains: "50+ Chains",
+        fees: "Variable",
+        tvl: "$8.2B",
+        speed: "2-20 min"
       },
       {
-        protocol: "Compound V3",
-        chain: "Ethereum",
-        asset: "USDC",
-        apy: "3.89%",
-        tvl: "$876M"
+        protocol: "Chainlink CCIP",
+        chains: "12 Chains",
+        fees: "Dynamic",
+        tvl: "$15.7B",
+        speed: "10-30 min"
       },
       {
-        protocol: "Aave V3",
-        chain: "Polygon",
-        asset: "WETH",
-        apy: "2.45%",
-        tvl: "$345M"
+        protocol: "Portal Bridge",
+        chains: "23 Chains",
+        fees: "0.3%",
+        tvl: "$1.4B",
+        speed: "15-45 min"
       }
     ];
-    setLendingProtocols(data);
+    setBridgeProtocols(data);
   };
 
   // Initialize all data
@@ -231,7 +231,7 @@ export default function ComplexPage() {
         generateInsuranceData();
         generatePredictionData();
         generateSyntheticData();
-        generateLendingData();
+        generateBridgeData();
       } catch (err) {
         console.error('Error loading data:', err);
       } finally {
@@ -287,20 +287,21 @@ export default function ComplexPage() {
       },
       synthetic: {
         title: "What are Synthetic Assets?",
-        main: "Synthetic assets are crypto tokens that track the price of real-world assets like stocks, gold, or oil. You can trade synthetic Tesla stock (sTSLA) without actually owning Tesla shares.",
-        eli5: "Imagine having a toy car that always costs the same as a real car. Synthetic assets are like toy versions of real investments that you can buy and sell with crypto!",
+        main: "Synthetic assets are crypto tokens that track the price of real-world assets like Tesla stock, Apple shares, or gold. You can trade synthetic Tesla (sTSLA) or Apple (sAAPL) without actually owning the real stocks, giving you exposure to traditional markets through DeFi.",
+        eli5: "Imagine having a magic coin that always matches the price of a Tesla car. When Tesla goes up, your coin is worth more. When Tesla goes down, your coin is worth less. That's how synthetic assets work - but for stocks, gold, and other real-world things!",
         resources: [
           { title: "Synthetix Protocol", description: "Leading synthetic assets platform", url: "https://synthetix.io/" },
           { title: "Synthetics Guide", description: "Understanding synthetic assets", url: "https://blog.synthetix.io/" }
         ]
       },
-      lending: {
-        title: "What is DeFi Lending?",
-        main: "DeFi lending lets you earn interest by lending your crypto to others, or borrow crypto by putting up collateral. It's like a bank but run by smart contracts with 24/7 availability and transparent rates.",
-        eli5: "It's like lending your toys to friends and getting extra toys back as a thank you, or borrowing toys by leaving your bike as a promise to return them!",
+      bridge: {
+        title: "What are Cross-Chain Bridges?",
+        main: "Cross-chain bridges allow you to move your cryptocurrency from one blockchain to another. Different blockchains like Ethereum, Polygon, and Arbitrum are like separate countries with different currencies. Bridges let you exchange and transfer your assets between these 'countries' to access different features, lower fees, or faster transactions.",
+        eli5: "Imagine you have dollars but you're visiting Japan where they use yen. A bridge is like a currency exchange that helps you turn your dollars into yen so you can buy things in Japan. Blockchain bridges do the same thing but with different crypto networks!",
         resources: [
-          { title: "Aave Protocol", description: "Leading DeFi lending platform", url: "https://aave.com/" },
-          { title: "Compound Finance", description: "Popular lending protocol", url: "https://compound.finance/" }
+          { title: "LayerZero Portal", description: "Omnichain interoperability protocol", url: "https://layerzero.network/" },
+          { title: "Chainlink CCIP", description: "Cross-Chain Interoperability Protocol", url: "https://chain.link/cross-chain" },
+          { title: "Portal Bridge", description: "Wormhole-powered bridge", url: "https://www.portalbridge.com/" }
         ]
       }
     };
@@ -655,8 +656,8 @@ export default function ComplexPage() {
           </motion.div>
         )}
 
-        {/* Tab Content - Advanced Lending */}
-        {activeTab === "lending" && (
+        {/* Tab Content - Cross-Chain Bridge */}
+        {activeTab === "bridge" && (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -670,23 +671,26 @@ export default function ComplexPage() {
                   <thead>
                     <tr className="border-b border-gray-200">
                       <th className="text-left py-3 px-4 font-semibold text-gray-900">Protocol</th>
-                      <th className="text-left py-3 px-4 font-semibold text-gray-900">Asset</th>
-                      <th className="text-right py-3 px-4 font-semibold text-gray-900">Deposit APY</th>
+                      <th className="text-left py-3 px-4 font-semibold text-gray-900">Supported Chains</th>
+                      <th className="text-right py-3 px-4 font-semibold text-gray-900">Fees</th>
                       <th className="text-right py-3 px-4 font-semibold text-gray-900">TVL</th>
+                      <th className="text-right py-3 px-4 font-semibold text-gray-900">Speed</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {lendingProtocols.map((protocol, index) => (
+                    {bridgeProtocols.map((bridge, index) => (
                       <tr key={index} className="border-b border-gray-100 hover:bg-gray-50">
                         <td className="py-4 px-4">
-                          <div className="font-medium text-gray-900">{protocol.protocol}</div>
-                          <div className="text-sm text-gray-500">{protocol.chain}</div>
+                          <div className="font-medium text-gray-900">{bridge.protocol}</div>
                         </td>
-                        <td className="py-4 px-4 text-gray-900">{protocol.asset}</td>
+                        <td className="py-4 px-4 text-gray-900">{bridge.chains}</td>
                         <td className="py-4 px-4 text-right">
-                          <span className="text-lg font-bold text-green-600">{protocol.apy}</span>
+                          <span className="text-lg font-bold text-blue-600">{bridge.fees}</span>
                         </td>
-                        <td className="py-4 px-4 text-right text-gray-900">{protocol.tvl}</td>
+                        <td className="py-4 px-4 text-right text-gray-900">{bridge.tvl}</td>
+                        <td className="py-4 px-4 text-right">
+                          <span className="text-sm font-medium text-green-600">{bridge.speed}</span>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -694,14 +698,30 @@ export default function ComplexPage() {
               </div>
             </div>
 
-            {/* Action Button */}
-            <div className="text-center">
+            {/* Multiple Action Buttons */}
+            <div className="flex flex-wrap justify-center gap-4">
               <a
-                href="https://aave.com"
+                href="https://layerzero.network/"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center px-8 py-3 bg-gradient-to-r from-blue-500 to-purple-600 text-white font-semibold rounded-lg hover:from-blue-600 hover:to-purple-700 transition-all duration-300 shadow-lg hover:shadow-xl cursor-pointer">
-                Go to Aave
+                className="inline-flex items-center px-6 py-3 bg-gradient-to-r from-purple-500 to-purple-600 text-white font-semibold rounded-lg hover:from-purple-600 hover:to-purple-700 transition-all duration-300 shadow-lg hover:shadow-xl cursor-pointer">
+                LayerZero Portal
+                <FiExternalLink className="ml-2" size={16} />
+              </a>
+              <a
+                href="https://chain.link/cross-chain"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center px-6 py-3 bg-gradient-to-r from-purple-500 to-purple-600 text-white font-semibold rounded-lg hover:from-purple-600 hover:to-purple-700 transition-all duration-300 shadow-lg hover:shadow-xl cursor-pointer">
+                Chainlink CCIP
+                <FiExternalLink className="ml-2" size={16} />
+              </a>
+              <a
+                href="https://www.portalbridge.com/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center px-6 py-3 bg-gradient-to-r from-purple-500 to-purple-600 text-white font-semibold rounded-lg hover:from-purple-600 hover:to-purple-700 transition-all duration-300 shadow-lg hover:shadow-xl cursor-pointer">
+                Portal Bridge
                 <FiExternalLink className="ml-2" size={16} />
               </a>
             </div>
@@ -709,10 +729,10 @@ export default function ComplexPage() {
             {/* Explain Button */}
             <div className="text-center">
               <button
-                onClick={() => openEducationModal("lending")}
+                onClick={() => openEducationModal("bridge")}
                 className="inline-flex items-center px-6 py-3 bg-white border border-gray-300 text-gray-700 font-semibold rounded-lg hover:bg-gray-50 hover:border-gray-400 transition-all duration-300 cursor-pointer">
                 <FiInfo className="mr-2" />
-                What is DeFi Lending?
+                What are Cross-Chain Bridges?
               </button>
             </div>
           </motion.div>

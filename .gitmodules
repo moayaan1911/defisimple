@@ -10,3 +10,12 @@
 [submodule "contracts/lib/foundry-devops"]
 	path = contracts/lib/foundry-devops
 	url = https://github.com/cyfrin/foundry-devops
+[submodule "contracts/lib/devtools"]
+	path = contracts/lib/devtools
+	url = https://github.com/layerzero-labs/devtools
+[submodule "contracts/lib/LayerZero-v2"]
+	path = contracts/lib/LayerZero-v2
+	url = https://github.com/LayerZero-Labs/LayerZero-v2
+[submodule "contracts/lib/ccip"]
+	path = contracts/lib/ccip
+	url = https://github.com/smartcontractkit/ccip

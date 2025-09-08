@@ -9,7 +9,6 @@ import {
   FiTrendingUp,
   FiDollarSign,
   FiImage,
-  FiLink,
 } from "react-icons/fi";
 import Link from "next/link";
 import ConnectWallet from "@/components/ConnectWallet";
@@ -136,10 +135,6 @@ export default function SimplePage() {
     image: string;
   }>>([]);
 
-  // Bridge state
-  const [bridgeAmount, setBridgeAmount] = useState("");
-  const [fromChain, setFromChain] = useState("Ethereum");
-  const [toChain, setToChain] = useState("Polygon");
 
   const tabs = [
     { id: "claim", name: "Claim", icon: FiGift, active: true },
@@ -147,7 +142,6 @@ export default function SimplePage() {
     { id: "stake", name: "Stake", icon: FiTrendingUp, active: true },
     { id: "lend", name: "Lend", icon: FiDollarSign, active: true },
     { id: "mint", name: "Mint", icon: FiImage, active: true },
-    { id: "bridge", name: "Bridge", icon: FiLink, active: true },
   ];
 
   // Countdown timer function
@@ -960,6 +954,7 @@ export default function SimplePage() {
     }
   }, [account]);
 
+
   const handleLend = async () => {
     if (!lendAmount || !account) return;
     
@@ -1366,12 +1361,6 @@ export default function SimplePage() {
     }
   };
 
-  const handleBridge = () => {
-    if (!bridgeAmount) return;
-    const dummyHash = `0x${Math.random().toString(16).substring(2, 66)}`;
-    showTransactionSuccess(dummyHash);
-    setBridgeAmount("");
-  };
 
 
   // Simple NFT Image component with ipfs.io gateway only
@@ -1547,28 +1536,6 @@ export default function SimplePage() {
             title: "CoinGecko NFT Guide",
             description: "NFTs explained for beginners",
             url: "https://www.coingecko.com/learn/non-fungible-tokens-nft-explained",
-          },
-        ],
-      },
-      bridge: {
-        title: "What are Cross-Chain Bridges?",
-        main: "Cross-chain bridges allow you to move your cryptocurrency from one blockchain to another. Think of blockchains as different islands - bridges connect these islands so you can move your assets between them and access different features, lower fees, or faster transactions.",
-        eli5: "Imagine you have toy cars that only work in your bedroom, but you want to play with them in the living room. A bridge is like a magic tunnel that can move your cars from your bedroom to the living room so you can play there too!",
-        resources: [
-          {
-            title: "LayerZero Documentation",
-            description: "Cross-chain interoperability protocol",
-            url: "https://layerzero.gitbook.io/docs/",
-          },
-          {
-            title: "Chainlink CCIP",
-            description: "Cross-Chain Interoperability Protocol",
-            url: "https://docs.chain.link/ccip",
-          },
-          {
-            title: "Ethereum.org Bridges",
-            description: "Official guide to blockchain bridges",
-            url: "https://ethereum.org/en/bridges/",
           },
         ],
       },
@@ -2710,8 +2677,8 @@ export default function SimplePage() {
           </motion.div>
         )}
 
-        {/* Bridge Tab Content */}
-        {activeTab === "bridge" && (
+        {/* Bridge Tab Content - COMMENTED OUT DUE TO FAILED IMPLEMENTATION */}
+        {/* {activeTab === "bridge" && (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -2747,6 +2714,21 @@ export default function SimplePage() {
                       <option value="Sepolia">Sepolia Testnet</option>
                       <option value="Base Sepolia">Base Sepolia Testnet</option>
                     </select>
+                    {account && (
+                      <div className="mt-2">
+                        <a
+                          href={fromChain === "Sepolia" 
+                            ? `https://sepolia.etherscan.io/address/${account.address}` 
+                            : `https://sepolia.basescan.org/address/${account.address}`
+                          }
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1"
+                        >
+                          View on {fromChain === "Sepolia" ? "Sepolia Explorer" : "Base Sepolia Explorer"} ↗
+                        </a>
+                      </div>
+                    )}
                   </div>
 
                   <div className="flex justify-center">
@@ -2771,6 +2753,21 @@ export default function SimplePage() {
                       <option value="Base Sepolia">Base Sepolia Testnet</option>
                       <option value="Sepolia">Sepolia Testnet</option>
                     </select>
+                    {account && (
+                      <div className="mt-2">
+                        <a
+                          href={toChain === "Sepolia" 
+                            ? `https://sepolia.etherscan.io/address/${account.address}` 
+                            : `https://sepolia.basescan.org/address/${account.address}`
+                          }
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1"
+                        >
+                          View on {toChain === "Sepolia" ? "Sepolia Explorer" : "Base Sepolia Explorer"} ↗
+                        </a>
+                      </div>
+                    )}
                   </div>
 
                   <div>
@@ -2786,8 +2783,16 @@ export default function SimplePage() {
                     />
                   </div>
 
-                  <div className="text-sm text-gray-600 text-center">
-                    Estimated time: 10-15 minutes • Bridge fee: ~0.001 ETH
+                  <div className="text-sm text-gray-600 text-center space-y-1">
+                    <div>Estimated time: 10-15 minutes • Fee: FREE (Gasless!)</div>
+                    {bridgeStats.bridgeCount > 0 && (
+                      <div>Total bridges: {bridgeStats.bridgeCount} • Total bridged: {bridgeStats.totalBridged} SUSD</div>
+                    )}
+                    {bridgeCooldown > Date.now() && (
+                      <div className="text-orange-600 font-medium">
+                        Next bridge available in: {Math.ceil((bridgeCooldown - Date.now()) / 60000)} minutes
+                      </div>
+                    )}
                   </div>
 
                   <div className="relative group">
@@ -2812,10 +2817,24 @@ export default function SimplePage() {
                       disabled={
                         !isWalletConnected ||
                         !bridgeAmount ||
-                        fromChain === toChain
+                        fromChain === toChain ||
+                        isBridgeLoading ||
+                        bridgeCooldown > Date.now() ||
+                        bridgeStats.isPaused
                       }
                       className="w-full py-3 bg-orange-600 text-white font-bold rounded-lg hover:bg-orange-700 disabled:bg-gray-300 transition-colors cursor-pointer disabled:cursor-not-allowed">
-                      Bridge Tokens
+                      {isBridgeLoading ? (
+                        <div className="flex items-center justify-center">
+                          <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white mr-2"></div>
+                          Bridging...
+                        </div>
+                      ) : bridgeCooldown > Date.now() ? (
+                        `Cooldown Active (${Math.ceil((bridgeCooldown - Date.now()) / 60000)}m)`
+                      ) : bridgeStats.isPaused ? (
+                        "Bridge Paused"
+                      ) : (
+                        "Bridge Tokens"
+                      )}
                     </motion.button>
                     {!isWalletConnected && (
                       <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none">
@@ -2867,7 +2886,7 @@ export default function SimplePage() {
               </div>
             </div>
           </motion.div>
-        )}
+        )} */}
       </div>
 
       {/* Educational Modal */}

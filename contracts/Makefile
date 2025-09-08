@@ -50,6 +50,12 @@ deploy-stake:
 deploy-lend:
 	@forge script script/SimpleLend.s.sol:DeploySimpleLend $(NETWORK_ARGS)
 
+deploy-bridge:
+	@forge script script/SimpleBridge.s.sol:DeploySimpleBridge $(NETWORK_ARGS)
+
+set-bridge-fee:
+	@forge script script/SetBridgeFee.s.sol:SetBridgeFee $(NETWORK_ARGS)
+
 # Deploy all contracts in correct order
 deploy-all:
 	@echo "🚀 Deploying all contracts in order..."

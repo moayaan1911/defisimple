@@ -9,9 +9,8 @@ export const CONTRACT_ADDRESSES = {
   SIMPLE_NFT: "0xfffb02cBBea60824476e67E6CAA39E9dF15C49d2",
   SIMPLE_STAKE: "0x9F68f3E960033F61141E0C3ae199683DFe4a5e06",
   SIMPLE_LEND: "0xf7A37382D440d2E619E2bd88784B28c7F3f6bA10",
+  SIMPLE_BRIDGE: "0x4789faE53A57f9D28392deE657675753Adb8821c",
 } as const;
-
-// ABIs are optional with thirdweb - contracts work without them
 
 // Contract instances
 export const simpleUSDContract = getContract({
@@ -48,6 +47,12 @@ export const simpleLendContract = getContract({
   client,
   chain: sepolia,
   address: CONTRACT_ADDRESSES.SIMPLE_LEND,
+});
+
+export const simpleBridgeContract = getContract({
+  client,
+  chain: sepolia,
+  address: CONTRACT_ADDRESSES.SIMPLE_BRIDGE,
 });
 
 // Helper functions
