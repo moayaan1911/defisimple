@@ -51,3 +51,4 @@ contracts/docs/
 contracts/.env
 
 CLAUDE.md
+.claude
